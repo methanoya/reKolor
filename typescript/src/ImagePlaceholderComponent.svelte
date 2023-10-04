@@ -6,6 +6,6 @@
 
 <div bind:clientWidth>
   <Figure>
-    <Image src="/placeholder.png" width={clientWidth} />
+    <Image src="./placeholder.png" width={clientWidth} />
   </Figure>
 </div>
