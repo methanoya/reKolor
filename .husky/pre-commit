@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo running husky pre-commit
+cd typescript && npm run pre-commit && git add --update .
