@@ -3,20 +3,6 @@
 version = 3
 
 [[package]]
-name = "Kolor"
-version = "0.1.0"
-dependencies = [
- "deltae",
- "image",
- "lab",
- "serde",
- "serde-wasm-bindgen",
- "typeshare",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
 name = "adler"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -453,6 +439,20 @@ checksum = "5ce3fb6ad83f861aac485e76e1985cd109d9a3713802152be56c3b1f0e0658ed"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
+]
+
+[[package]]
+name = "rekolor"
+version = "0.1.1"
+dependencies = [
+ "deltae",
+ "image",
+ "lab",
+ "serde",
+ "serde-wasm-bindgen",
+ "typeshare",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

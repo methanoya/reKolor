@@ -69,7 +69,7 @@ impl From<&RgbColorReplacementPair> for TranslationCache {
         let RgbColor8 {r, g, b} = value.to;
         Self {
             rgb: RgbColorTranslation {
-                from: value.from.clone().into(),
+                from: value.from.clone(),
                 to: [r, g, b].into(),
             },
             lab: (&value.to).into(),
@@ -79,7 +79,7 @@ impl From<&RgbColorReplacementPair> for TranslationCache {
 
 impl From<&RgbColor8> for LabValue {
     fn from(value: &RgbColor8) -> Self {
-        let rgb: [u8; 3] = [*&value.r, *&value.g, *&value.b];
+        let rgb: [u8; 3] = [value.r, value.g, value.b];
         let Lab { l, a, b } = Lab::from_rgb(&rgb);
         Self {
             l,
@@ -122,7 +122,7 @@ fn lookup(map: &Vec<TranslationCache>, pixel:  &Rgb<u8>) -> (Rgb<u8>, bool) {
                     }
                 }
             }
-            return (*best_color, false);
+            (*best_color, false)
         },
         _ => unreachable!("{:?}", pixel),
     }
@@ -137,23 +137,18 @@ pub fn replace_rgb_colors(image: &Vec<u8>, colors: &Vec<RgbColorReplacementPair>
     let mut exact_counter = 0usize;
     let mut nearest_counter = 0usize;
     let mut total_counter = 0usize;
-    let fill: Rgba<u8> = Rgb([0u8, 255u8, 0u8]).to_rgba();
+    // let fill: Rgba<u8> = Rgb([0u8, 255u8, 0u8]).to_rgba();
     for (x, y, pixel) in input_image.pixels() {
         total_counter += 1;
         // output_buffer.put_pixel(x, y, rgba2rgb(pixel).to_rgba());
         let rgb_pixel = rgba2rgb(pixel);
-        match rgb_pixel.channels() {
-            [r, g, b] => {
-                let (color, exact) = lookup(&color_map, &rgb_pixel);
-                if exact {
-                    exact_counter += 1;
-                } else {
-                    nearest_counter += 1;
-                }
-                output_buffer.put_pixel(x, y, color.to_rgba());
-            },
-            _ => unreachable!("{:?}", rgb_pixel),
+        let (color, exact) = lookup(&color_map, &rgb_pixel);
+        if exact {
+            exact_counter += 1;
+        } else {
+            nearest_counter += 1;
         }
+        output_buffer.put_pixel(x, y, color.to_rgba());
     }
     log_1(&format!("Matching: exact: {exact_counter}, nearest: {nearest_counter}, total: {total_counter}").into());
     let mut output_image: Vec<u8> = Vec::new();

@@ -4,7 +4,7 @@ mod conv;
 mod console;
 
 use std::fs;
-use std::io::Read;
+// use std::io::Read;
 use std::io::Write;
 use conv::{RgbColor8, RgbColorReplacementPair};
 
@@ -14,14 +14,7 @@ fn main() {
     let file_path_output = "../typescript/samples/output-icon-calendar.png";
     println!("Going to read {}", file_path_input);
     let raw = fs::read(file_path_input).expect("Couldn't find file");
-    // println!("{:?}", raw);
     println!("{:?}", info::image_info(&raw));
-    // ColorTranslation {
-    //     from: RgbColor { r: 235, g: 239, b: 240 },
-    //     to: RgbColor { r: 255, g: 255, b: 255 } },
-    // ColorTranslation {
-    //     from: RgbColor { r: 255, g: 255, b: 255 },
-    //     to: RgbColor { r: 255, g: 255, b: 255 } }
     let colors: Vec<RgbColorReplacementPair> = vec![
         RgbColorReplacementPair {
             // rgb (230, 75, 59), alpha(0.996) #e64c3c

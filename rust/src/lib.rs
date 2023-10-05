@@ -4,19 +4,10 @@ mod console;
 mod utils;
 
 use wasm_bindgen::prelude::*;
-use serde::{Deserialize, Serialize};
 
 #[wasm_bindgen]
 extern "C" {
-    fn alert(s: &str);
-    #[wasm_bindgen(js_name = alert)]
-    fn alert_usize(a: usize);
-}
-
-#[wasm_bindgen]
-pub fn greet() {
-    alert("Hello in JS from Rust!");
-    alert_usize(5);
+    fn alert(msg: &str);
 }
 
 #[wasm_bindgen]

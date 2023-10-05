@@ -20,12 +20,6 @@ impl Into<JsValue> for ImageInfo {
     }
 }
 
-// impl From<ImageInfo> for JsValue {
-//     fn from(value: ImageInfo) -> Self {
-//         serde_wasm_bindgen::to_value(&value).unwrap()
-//     }
-// }
-
 pub fn image_info(image: &Vec<u8>) -> Result<ImageInfo, String> {
     match utils::read(image) {
         Ok(image) => {
@@ -37,8 +31,8 @@ pub fn image_info(image: &Vec<u8>) -> Result<ImageInfo, String> {
                 real_colors.insert(pixel);
             }
             Ok(ImageInfo {
-                width: width,
-                height: height,
+                width,
+                height,
                 rgb_colors: rgb_colors.len() as u32,
                 real_colors: real_colors.len() as u32,
             })
