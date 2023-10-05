@@ -1,7 +1,7 @@
 import rgbHex from 'rgb-hex';
 
 export function convertStringBase64ToU8Array(input: string): Uint8Array {
-  input = atob(input);
+  input = window.atob(input);
   const result = new Uint8Array(input.length);
   for (let idx = 0; idx < input.length; idx++) {
     result[idx] = input.charCodeAt(idx);
@@ -10,7 +10,7 @@ export function convertStringBase64ToU8Array(input: string): Uint8Array {
 }
 
 export function convertU8ArrayToStringBase64(input: Uint8Array): string {
-  return btoa(String.fromCharCode(...input));
+  return window.btoa(String.fromCharCode(...input));
 }
 
 export function rawFileToDataUrl(

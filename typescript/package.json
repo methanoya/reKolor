@@ -20,6 +20,8 @@
     "@rollup/plugin-node-resolve": "^11.2.1",
     "@rollup/plugin-typescript": "^8.5.0",
     "@tsconfig/svelte": "^2.0.0",
+    "@types/color-diff": "^1.2.2",
+    "@types/lodash": "^4.14.199",
     "@typescript-eslint/eslint-plugin": "^6.7.3",
     "@typescript-eslint/parser": "^6.7.3",
     "@wasm-tool/rollup-plugin-rust": "^2.4.4",

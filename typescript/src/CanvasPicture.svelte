@@ -1,35 +1,26 @@
 <script lang="ts">
-  import { htmlColor, rgba2rgb } from './utils';
+  import { rgba2rgb } from './utils';
 
   export let image: ProcessingImageType;
 
-  import { Stage, Layer, Rect, Image } from 'svelte-konva';
+  import { Stage, Layer, Image } from 'svelte-konva';
   import { afterUpdate, onMount } from 'svelte';
   import _ from 'lodash';
   import { pickingStripes } from './store';
   import type { ProcessingImageType } from './types';
   import { pantone } from './palette';
 
-  let clientWidth: number, clientHeight: number;
+  let clientWidth: number;
   let stageWidth: number, stageHeight: number;
   let imageFactor: number = 1;
   let htmlImage: HTMLImageElement;
-  let rectColor: string = 'blue';
 
   onMount(() => {
     const imgTag = document.createElement('img');
     // img.src = "https://konvajs.org/assets/yoda.jpg";
-    // console.log("!!! image:", image)
     imgTag.src = image.content;
     imgTag.onload = () => {
       htmlImage = imgTag;
-      // console.log(
-      //   '!!! onMount::load !!!',
-      //   image.width,
-      //   image.height,
-      //   clientWidth,
-      //   clientHeight,
-      // );
       htmlImage.width = imageFactor * image.width;
       htmlImage.height = imageFactor * image.height;
     };
@@ -38,13 +29,6 @@
   afterUpdate(() => {
     if (htmlImage && htmlImage.src != image.content) {
       htmlImage.src = image.content;
-      // console.log(
-      //   '!!! afterUpdate !!!',
-      //   image.width,
-      //   image.height,
-      //   clientWidth,
-      //   clientHeight,
-      // );
     }
   });
 
@@ -81,7 +65,6 @@
       'matched to',
       nominal,
     );
-    rectColor = htmlColor({ r, g, b, a });
     pickingStripes.update((list) => {
       for (const entry of list) {
         if (_.isEqual(entry.original, original)) {
@@ -109,27 +92,13 @@
 
 <div
   bind:clientWidth
-  bind:clientHeight
   class="d-flex justify-content-md-center align-items-center"
 >
-  <!--  <Figure {caption}>-->
   <Stage config={{ width: stageWidth, height: stageHeight }}>
     {#if htmlImage}
       <Layer>
         <Image config={{ image: htmlImage }} on:click={onMouse} />
       </Layer>
-      <!--        <Layer>-->
-      <!--          <Rect-->
-      <!--            config={{-->
-      <!--              x: 100,-->
-      <!--              y: 100,-->
-      <!--              width: 200,-->
-      <!--              height: 200,-->
-      <!--              fill: rectColor,-->
-      <!--            }}-->
-      <!--          />-->
-      <!--        </Layer>-->
     {/if}
   </Stage>
-  <!--  </Figure>-->
 </div>

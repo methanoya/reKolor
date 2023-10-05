@@ -1,5 +1,5 @@
-import { diff } from 'color-diff';
-import type { RgbColor8 } from './types';
+import { diff, rgb_to_lab } from 'color-diff';
+import type { PaletteEntry, RgbColor8 } from './types';
 import pantonePalette from './palettes/pantone.json';
 
 export function pantone(original: RgbColor8): [RgbColor8, string] {
@@ -10,12 +10,20 @@ export function pantone(original: RgbColor8): [RgbColor8, string] {
   for (const name in pantonePalette) {
     const {
       rgb: [R, G, B],
-    } = pantonePalette[name];
-    const distance = diff(original, {
-      R,
-      G,
-      B,
-    });
+    } = pantonePalette[name] as PaletteEntry;
+    const { r, g, b } = original;
+    const distance = diff(
+      rgb_to_lab({
+        R: r,
+        G: g,
+        B: b,
+      }),
+      rgb_to_lab({
+        R,
+        G,
+        B,
+      }),
+    );
     // console.log(original.r, original.g, original.b, 'to', name, distance);
     if (name.indexOf('non-palette') >= 0) {
       if (distance < bestOutDistance) {

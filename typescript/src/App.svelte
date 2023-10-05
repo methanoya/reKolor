@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
   import {
     Input,
     Container,
@@ -8,20 +7,20 @@
     Card,
     CardFooter,
     CardHeader,
-    CardTitle,
     CardBody,
     CardSubtitle,
     Button,
   } from 'sveltestrap';
-  import { dataUrlToRawFile, rawFileToDataUrl } from './utils';
-  import CanvasPictureComponent from './CanvasPictureComponent.svelte';
+  import { onDestroy } from 'svelte';
   import prettyBytes from 'pretty-bytes';
+  import { dataUrlToRawFile, rawFileToDataUrl } from './utils';
   import { pickingStripes } from './store';
   import type { ImageInfo, RgbColorReplacementPair } from './typeshare';
   import type { PickingStripeType, ProcessingImageType } from './types';
+  import CanvasPicture from './CanvasPicture.svelte';
+  import ImagePlaceholder from './ImagePlaceholder.svelte';
+  import PageHeader from './PageHeader.svelte';
   import PickingStripeList from './PickingStripeList.svelte';
-  import ImagePlaceholderComponent from './ImagePlaceholderComponent.svelte';
-  import PageHeaderComponent from './PageHeaderComponent.svelte';
 
   export let bindings;
 
@@ -69,8 +68,8 @@
     )}, ${width} x ${height}, ${rgb_colors} colors`;
   };
 
-  const onOriginalFileSelected = (e) => {
-    original_file = e.target.files[0];
+  const onOriginalFileSelected = (event) => {
+    original_file = event.target.files[0];
     original_image = undefined;
     processed_image = undefined;
     pickingStripes.set([]);
@@ -115,7 +114,7 @@
 <Container>
   <Row>
     <Col>
-      <PageHeaderComponent />
+      <PageHeader />
     </Col>
   </Row>
 
@@ -127,11 +126,11 @@
         </CardHeader>
         <CardBody>
           {#if original_image}
-            <CanvasPictureComponent image={original_image} />
+            <CanvasPicture image={original_image} />
           {:else if original_file}
             <h1>Loading...</h1>
           {:else}
-            <ImagePlaceholderComponent />
+            <ImagePlaceholder />
           {/if}
         </CardBody>
         <CardFooter>
@@ -157,7 +156,7 @@
           {#if processing_indication}
             <h1>Processing...</h1>
           {:else if processed_image}
-            <CanvasPictureComponent image={processed_image} />
+            <CanvasPicture image={processed_image} />
           {:else}
             <ul>
               <li>Upload image</li>

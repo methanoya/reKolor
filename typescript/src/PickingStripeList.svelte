@@ -4,7 +4,7 @@
   import type { PickingStripeType } from './types';
   import { pickingStripes } from './store';
   import { STRIPS_COLUMNS } from './constants';
-  import PickingStripeComponent from './PickingStripeComponent.svelte';
+  import PickingStripe from './PickingStripe.svelte';
 
   let stripes: PickingStripeType[] = [];
   onDestroy(
@@ -34,7 +34,7 @@
     {#each Array(STRIPS_COLUMNS) as _, column_index}
       <Col>
         {#if stripes[row_index * STRIPS_COLUMNS + column_index]}
-          <PickingStripeComponent
+          <PickingStripe
             stripe={stripes[row_index * STRIPS_COLUMNS + column_index]}
           />
         {/if}

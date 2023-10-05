@@ -7,6 +7,10 @@ export interface RgbaColor8 {
   a: number;
 }
 
+export interface PaletteEntry {
+  rgb: [number, number, number];
+}
+
 export interface ProcessingImageType {
   width: number;
   height: number;
