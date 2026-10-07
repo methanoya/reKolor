@@ -1,36 +1,18 @@
-# The workspace (R1, R2). The root package below is the existing crate; it stays a member until
-# `crates/core` reproduces its baseline (task step 4), then it is removed.
+# The Rust workspace (R1, R2).
 [workspace]
 resolver = "3"
-members = [".", "crates/core", "crates/wasm", "crates/io", "crates/cli"]
+members = ["crates/core", "crates/wasm", "crates/io", "crates/cli"]
 
 [workspace.package]
 version = "0.2.0"
 edition = "2024"
-authors = ["Timur Gamerov"]
+authors = ["Metan"]
 publish = false
 
-[package]
-name = "rekolor"
-version = "0.1.1"
-edition = "2024"
-authors = ["Timur Gamerov"]
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-[lib]
-crate-type = ["cdylib", "rlib"]
-
-
-[dependencies]
-# All readable formats; the default "avif" feature is left out because it is only an AVIF encoder.
+[workspace.dependencies]
+# For `rekolor-io` (task step 7). All readable formats; the default "avif" feature is left out
+# because it is only an AVIF encoder (see "Image formats" in the decisions).
 image = { version = "0.25.10", default-features = false, features = [
     "rayon",
     "bmp", "dds", "exr", "ff", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "tga", "tiff", "webp",
 ] }
-serde = { version = "1.0.229", features = ["derive"] }
-serde-wasm-bindgen = "0.6.5"
-wasm-bindgen = "0.2.129"
-web-sys = { version = "0.3.106", features = ["console"] }
-typeshare = "1.0.5"
-deltae = "0.3.2"
-lab = "0.11.0"

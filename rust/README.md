@@ -12,19 +12,30 @@ existing crate **after the dependency upgrade** (R12), not from the 2023 code it
 | `testdata/baseline/image-info.tsv` | Output of `image_info` for every fixture. |
 | `testdata/baseline/pantone-suggestions.tsv` | The 2023 JavaScript Pantone suggestion (`typescript/src/palette.ts`, with `color-diff`) for 5,096 colors (a 16-level grid plus 1,000 pseudo-random colors), with its ΔE. Reference for the Rust suggestion (R10), compared with a near-tie tolerance. |
 
-### Re-recording
+### How it was recorded
 
-Only when the inputs change on purpose (then in the same change as `testdata/generator.rs`):
+The baseline was recorded at commit `c0d094c` ("Record the baseline"), which contains the existing
+crate's sources and the recorder (`rust/src/`, `rust/examples/record_baseline.rs`).
+The recorder included the existing modules (`src/conv.rs`, `info.rs`, `utils.rs`, `console.rs`)
+unchanged, the same way `src/main.rs` did. It encoded each fixture as a lossless PNG (checked by
+decoding it again), then passed it to `image_info` and `replace_rgb_colors`.
+
+The existing crate has since been removed; `crates/core` reproduces it (tests in
+`crates/core/tests/baseline.rs` and `suggestions.rs`). The baseline is not re-recorded from the new
+code: it is the fixed reference. If the inputs in `testdata/generator.rs` ever have to change,
+re-record from that commit:
 
 ```sh
+git worktree add ../rekolor-baseline c0d094c     # the existing crate + recorder
+# copy the new testdata/generator.rs into it, then, inside ../rekolor-baseline/rust:
 cargo run --release --example record_baseline     # recolor outputs + image-info.tsv
-node testdata/record_pantone_suggestions.cjs      # pantone-suggestions.tsv (needs `npm ci` in typescript/)
 ```
 
-`examples/record_baseline.rs` includes the existing modules (`src/conv.rs`, `info.rs`, `utils.rs`,
-`console.rs`) unchanged, the same way `src/main.rs` does. Each fixture is encoded as a lossless PNG
-(checked by decoding it again), then passed to `image_info` and `replace_rgb_colors`.
-`--inputs <dir>` also writes the fixture PNGs, for feeding the WASM build.
+The JavaScript suggestions don't depend on the removed crate:
+
+```sh
+node testdata/record_pantone_suggestions.cjs      # pantone-suggestions.tsv (needs `npm ci` in typescript/)
+```
 
 ### Verified when recorded (2026-10-07)
 
