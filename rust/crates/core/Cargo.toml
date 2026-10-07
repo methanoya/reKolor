@@ -7,3 +7,11 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
+deltae = "0.3.2"
+lab = "0.11.0"
+log = "0.4.34"
+thiserror = "2.0.21"
+
+[dev-dependencies]
+png = "0.18.1"
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
