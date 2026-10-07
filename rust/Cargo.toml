@@ -10,7 +10,11 @@ crate-type = ["cdylib", "rlib"]
 
 
 [dependencies]
-image = "0.25.10"
+# All readable formats; the default "avif" feature is left out because it is only an AVIF encoder.
+image = { version = "0.25.10", default-features = false, features = [
+    "rayon",
+    "bmp", "dds", "exr", "ff", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "tga", "tiff", "webp",
+] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"
 wasm-bindgen = "0.2.129"
