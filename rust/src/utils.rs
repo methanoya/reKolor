@@ -1,10 +1,9 @@
-use image::io::Reader;
-use image::{DynamicImage, ImageError, };
+use image::{DynamicImage, ImageError, ImageReader};
 use web_sys::console;
 use std::io::Cursor;
 
 pub fn read(input: &Vec<u8>) -> Result<DynamicImage, ImageError> {
-    match Reader::new(Cursor::new(input)).with_guessed_format() {
+    match ImageReader::new(Cursor::new(input)).with_guessed_format() {
         Ok(raw) => match raw.decode() {
             Ok(value) => Ok(value),
             Err(err) => {

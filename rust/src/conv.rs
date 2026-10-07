@@ -152,7 +152,7 @@ pub fn replace_rgb_colors(image: &Vec<u8>, colors: &Vec<RgbColorReplacementPair>
     }
     log_1(&format!("Matching: exact: {exact_counter}, nearest: {nearest_counter}, total: {total_counter}").into());
     let mut output_image: Vec<u8> = Vec::new();
-    if let Err(err) = output_buffer.write_to(&mut Cursor::new(&mut output_image), image::ImageOutputFormat::Png) {
+    if let Err(err) = output_buffer.write_to(&mut Cursor::new(&mut output_image), image::ImageFormat::Png) {
         log_1(&err.to_string().into());
         unreachable!("Writing error");
     }
