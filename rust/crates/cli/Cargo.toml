@@ -1,0 +1,11 @@
+[package]
+name = "rekolor-cli"
+description = "Command-line tool for rekolor: recolor files, generate palette configs, update goldens"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+rekolor-core = { path = "../core" }
+rekolor-io = { path = "../io" }

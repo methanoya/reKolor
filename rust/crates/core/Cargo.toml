@@ -1,0 +1,9 @@
+[package]
+name = "rekolor-core"
+description = "Color matching and recoloring on raw RGBA8 buffers; no I/O, no browser or WASM dependencies"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]

@@ -1,3 +1,15 @@
+# The workspace (R1, R2). The root package below is the existing crate; it stays a member until
+# `crates/core` reproduces its baseline (task step 4), then it is removed.
+[workspace]
+resolver = "3"
+members = [".", "crates/core", "crates/wasm", "crates/io", "crates/cli"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+authors = ["Timur Gamerov"]
+publish = false
+
 [package]
 name = "rekolor"
 version = "0.1.1"

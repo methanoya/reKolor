@@ -1,0 +1,13 @@
+[package]
+name = "rekolor-wasm"
+description = "Typed browser interface (wasm-bindgen + tsify) over rekolor-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rekolor-core = { path = "../core" }

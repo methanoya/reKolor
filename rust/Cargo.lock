@@ -962,6 +962,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "rekolor-cli"
+version = "0.2.0"
+dependencies = [
+ "rekolor-core",
+ "rekolor-io",
+]
+
+[[package]]
+name = "rekolor-core"
+version = "0.2.0"
+
+[[package]]
+name = "rekolor-io"
+version = "0.2.0"
+dependencies = [
+ "rekolor-core",
+]
+
+[[package]]
+name = "rekolor-wasm"
+version = "0.2.0"
+dependencies = [
+ "rekolor-core",
+]
+
+[[package]]
 name = "rgb"
 version = "0.8.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"

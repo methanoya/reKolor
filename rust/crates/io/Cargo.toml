@@ -1,0 +1,10 @@
+[package]
+name = "rekolor-io"
+description = "Native file decoding and encoding for rekolor (image crate), with decoder-discrepancy warnings"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+rekolor-core = { path = "../core" }
