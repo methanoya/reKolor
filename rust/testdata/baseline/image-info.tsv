@@ -1,0 +1,7 @@
+# fixture	width	height	rgb_colors	real_colors
+alpha_ramp	256	8	8	2048
+edges	96	96	11	14
+picks	7	11	69	69
+gradient	64	48	3072	3072
+noise	128	96	12284	12288
+transparent	16	16	256	256
