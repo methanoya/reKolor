@@ -179,8 +179,17 @@ local) kept those; changes so far:
 
 - **I5:** `Palette::suggest` is the plain nearest entry (CIEDE2000, ties to the earlier entry). The
   2023 preference for real inks over "Pure White/Black (non-palette)" was dropped; on the snapshot's
-  5,096 colors this changed 6 suggestions, all near-black or near-white. Golden configs keep their
-  stored inks, so the goldens didn't change.
+  5,096 colors this changed 6 suggestions, all near-black or near-white. The recolor algorithm didn't
+  change, so the 30 generated recolor baseline PNGs stayed the same. The owner then chose to
+  regenerate the golden configs, which changed two configs and four outputs:
+  - `02-scarlet-macaw`: the background pick `[244,239,235]` goes from Pantone 427 to Pure White at all
+    three sizes. At size 16 the freed Pantone 427 then goes to `[225,219,207]`, replacing the
+    `[171,59,47]` / Pantone 1805 pick.
+  - `06-neon-street` size 16: the `[255,255,239]` candidate now suggests Pure White, which is already
+    taken, so the generator skips it and `[76,41,48]` / Pantone 5185 takes the slot.
+
+  The generator skips any candidate whose ink is already taken, so one renamed suggestion can move
+  later picks.
 
 - **I8 (contract, no change):** with no mappings, `recolor` returns the composited copy (the image as
   it looks on white); with one mapping, every pixel takes that ink. Tested in `core`, WASM and the TS

@@ -43,7 +43,12 @@ fn main() {
             let mut out = vec![0; fixture.rgba.len()];
             recolor(image, &mappings, &mut out).unwrap();
             let path = baseline.join(format!("recolor/{}__{}.png", fixture.name, set.name));
-            if decode_png(&path).as_deref() != Some(&out[..]) {
+            // Rewrite unless size and pixels both match (the baseline test checks both).
+            let current = decode_png(&path);
+            let unchanged = current.as_ref().is_some_and(|(w, h, rgba)| {
+                (*w, *h) == (fixture.width, fixture.height) && rgba[..] == out[..]
+            });
+            if !unchanged {
                 write_png(&path, &out, fixture.width, fixture.height);
                 changed.push(relative(&path, &rust_dir));
             }
@@ -124,8 +129,8 @@ fn pantone(path: &Path) -> Palette {
     Palette::new(entries).unwrap()
 }
 
-/// RGBA8 pixels of a PNG, or `None` if the file is missing or unreadable.
-fn decode_png(path: &Path) -> Option<Vec<u8>> {
+/// A PNG as RGBA8: (width, height, pixels), or `None` if the file is missing or unreadable.
+fn decode_png(path: &Path) -> Option<(u32, u32, Vec<u8>)> {
     let mut decoder = png::Decoder::new(BufReader::new(File::open(path).ok()?));
     decoder.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = decoder.read_info().ok()?;
@@ -133,7 +138,7 @@ fn decode_png(path: &Path) -> Option<Vec<u8>> {
     let info = reader.next_frame(&mut buf).ok()?;
     (info.color_type == png::ColorType::Rgba).then(|| {
         buf.truncate(info.buffer_size());
-        buf
+        (info.width, info.height, buf)
     })
 }
 
