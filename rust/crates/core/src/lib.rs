@@ -22,4 +22,4 @@ pub use error::Error;
 pub use image::ImageRef;
 pub use palette::{NON_PALETTE_MARKER, Palette, PaletteEntry, PaletteMatch};
 pub use pick::{ColorMismatch, PICK_MISMATCH_TOLERANCE, Pick, pick};
-pub use recolor::{Mapping, RecolorStats, recolor};
+pub use recolor::{Mapping, MaterialRange, RecolorStats, recolor, recolor_with_ranges};

@@ -109,6 +109,7 @@ fn request(set: &str) -> Ts<RecolorRequest> {
         })
         .collect();
     Ts::from_rust(&RecolorRequest {
+        material_ranges: vec![],
         material: WHITE,
         mappings,
     })
@@ -412,6 +413,7 @@ fn zero_and_one_mapping_follow_the_contract() {
     let mut out = [0u8; 8];
 
     let none = Ts::from_rust(&RecolorRequest {
+        material_ranges: vec![],
         material: WHITE,
         mappings: vec![],
     })
@@ -421,6 +423,7 @@ fn zero_and_one_mapping_follow_the_contract() {
     assert_eq!((stats.exact, stats.nearest), (0.0, 2.0));
 
     let one = Ts::from_rust(&RecolorRequest {
+        material_ranges: vec![],
         material: WHITE,
         mappings: vec![Mapping {
             source: rgb([230, 76, 60]),
@@ -502,6 +505,7 @@ fn nearest_ink_ties_go_to_the_earlier_mapping() {
     let mut out = [0u8; 4];
     for (first, second, expected) in [(a, b, [0, 2, 227, 255]), (b, a, [0, 4, 0, 255])] {
         let request = Ts::from_rust(&RecolorRequest {
+            material_ranges: vec![],
             material: WHITE,
             mappings: vec![
                 Mapping {
@@ -685,12 +689,14 @@ fn color_count_matches_analyze_and_mappings_are_capped() {
         ink: rgb([0, 0, 0]),
     };
     let allowed = Ts::from_rust(&RecolorRequest {
+        material_ranges: vec![],
         material: WHITE,
         mappings: (0..256).map(mapping).collect(),
     })
     .unwrap();
     let _: RecolorStats = ok(read(image.recolor(allowed, &mut out)));
     let too_many = Ts::from_rust(&RecolorRequest {
+        material_ranges: vec![],
         material: WHITE,
         mappings: (0..257).map(mapping).collect(),
     })
@@ -718,6 +724,7 @@ fn every_call_composites_over_the_given_material() {
     // No mappings: the copy composited over the material (I8 c).
     let mut out = [0u8; 12];
     let none = Ts::from_rust(&RecolorRequest {
+        material_ranges: vec![],
         mappings: vec![],
         material: black,
     })

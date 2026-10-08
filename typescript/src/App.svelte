@@ -10,14 +10,17 @@
   import { LIMITS } from './lib/limits';
   import type { AppOutcome } from './lib/outcome';
   import {
+    BLACK,
     WHITE,
     css,
+    cssAlpha,
     fromHex,
     hex,
     mappings,
     sameRgb,
     type PickEntry,
     type PickMove,
+    type RangeEntry,
   } from './lib/picks';
   import { Serial } from './lib/serial';
   import { fit, resize, zoomAt, type Size, type View } from './lib/view';
@@ -83,6 +86,19 @@
    * no input came after it, so the input never jumps back from a newer choice.
    */
   let materialInputs = 0;
+  /** Colors left to the material (prototype): pixels within ΔE of them are not printed. */
+  let ranges = $state<RangeEntry[]>([]);
+  let nextRangeId = 1;
+  /** The next click on the original adds a material range instead of a pick. */
+  let addingRange = $state(false);
+  /**
+   * Whether a material was chosen (picker, White, Black, or an import with a non-white one).
+   * Until then the material is "none": the frames show the checkerboard, and the engine composites
+   * over white as before the material color.
+   */
+  let materialChosen = $state(false);
+  /** The ΔE a new material range starts with. */
+  const RANGE_DELTA_E = 10;
 
   let view = $state<View>({ scale: 1, x: 0, y: 0 });
   let viewport: Size = { width: 0, height: 0 };
@@ -101,6 +117,8 @@
     colors = undefined;
     file = undefined;
     picks = [];
+    ranges = ranges.filter((r) => r.material);
+    addingRange = false;
     mover.reset();
     resultRevision = -1;
   }
@@ -135,6 +153,8 @@
     file = { name: f.name, size: f.size };
     colors = undefined;
     picks = [];
+    ranges = ranges.filter((r) => r.material);
+    addingRange = false;
     mover.reset();
     view = fit(image, viewport);
     status = 'Click a color in the original to pick it.';
@@ -154,6 +174,11 @@
 
   // ── Picks ────────────────────────────────────────────────────────────────────────────────────
   function pickAt(x: number, y: number, seen: Rgba | undefined) {
+    if (addingRange) {
+      addingRange = false;
+      addRange(x, y, seen);
+      return;
+    }
     const gen = generation;
     void mutations.run(async () => {
       if (gen !== generation) return;
@@ -285,24 +310,40 @@
 
   /** Applies material input number `input` (runs inside `mutations`). */
   async function applyMaterial({ color: next, input }: { color: Rgb; input: number }) {
-    if (sameRgb(next, material)) return;
-    const gen = generation;
-    const rematched = await rematch(picks, next);
-    if (!rematched) {
-      // Not applied: the input goes back to the applied material, unless it shows a newer choice.
-      if (input === materialInputs) materialInput = hex(material);
-      return;
-    }
-    // A new image opened meanwhile has no picks yet (its picks queue behind this task).
+    const changed = !sameRgb(next, material);
     let resuggested = 0;
-    if (gen === generation) {
-      resuggested = rematched.filter((p, i) => !sameRgb(p.matching, picks[i]!.matching)).length;
-      picks = rematched;
+    if (changed) {
+      const gen = generation;
+      const rematched = await rematch(picks, next);
+      if (!rematched) {
+        // Not applied: the input goes back to the applied material, unless it shows a newer choice.
+        if (input === materialInputs) materialInput = hex(material);
+        return;
+      }
+      // A new image opened meanwhile has no picks yet (its picks queue behind this task).
+      if (gen === generation) {
+        resuggested = rematched.filter((p, i) => !sameRgb(p.matching, picks[i]!.matching)).length;
+        picks = rematched;
+      }
+      material = next;
     }
-    material = next;
+    // Choosing a material (even the one in use) leaves its own color unprinted (prototype).
+    materialChosen = true;
+    setMaterialRange(next);
     status = `Material ${hex(next)}${resuggested ? ` · ${resuggested} pick${resuggested === 1 ? '' : 's'} re-suggested` : ''}.`;
     requestRecolor();
-    if (image) void countColors();
+    if (changed && image) void countColors();
+  }
+
+  /**
+   * The material's own color as a range with the default ΔE (prototype): added if missing (also
+   * after being removed), otherwise moved to the new color with its ΔE kept.
+   */
+  function setMaterialRange(color: Rgb) {
+    const pixel = { ...color, a: 255 };
+    ranges = ranges.some((r) => r.material)
+      ? ranges.map((r) => (r.material ? { ...r, pixel } : r))
+      : [{ id: nextRangeId++, pixel, deltaE: RANGE_DELTA_E, material: true }, ...ranges];
   }
 
   /**
@@ -328,6 +369,40 @@
       const ink = r?.alternatives?.[0];
       return r && ink ? { ...p, matching: r.matching, ink, alternatives: r.alternatives! } : p;
     });
+  }
+
+  // ── Material ranges (prototype): colors left unprinted, the material shows instead ─────────────
+  // A range is a pixel from the original and a ΔE: every pixel whose color (composited over the
+  // material, in Rust) is within that ΔE of the range's pixel shows the material and takes no ink.
+  // Ranges are checked before the picks.
+
+  /** Adds a material range at the clicked pixel (queued like a pick: it reads the material). */
+  function addRange(x: number, y: number, seen: Rgba | undefined) {
+    const gen = generation;
+    void mutations.run(async () => {
+      if (gen !== generation) return;
+      const on = material;
+      const picked = await client.call((api) => api.pick(gen, x, y, on, seen));
+      if (gen !== generation) return;
+      if (picked.status === 'error') {
+        error = picked.error.message;
+        return;
+      }
+      const { pixel } = picked.value;
+      ranges = [...ranges, { id: nextRangeId++, pixel, deltaE: RANGE_DELTA_E, at: { x, y } }];
+      status = `Left to the material: (${pixel.r}, ${pixel.g}, ${pixel.b}) and colors within ΔE ${RANGE_DELTA_E}.`;
+      requestRecolor();
+    });
+  }
+
+  function setRangeDeltaE(id: number, deltaE: number) {
+    ranges = ranges.map((r) => (r.id === id ? { ...r, deltaE } : r));
+    requestRecolor();
+  }
+
+  function removeRange(id: number) {
+    ranges = ranges.filter((r) => r.id !== id);
+    requestRecolor();
   }
 
   /** Queues a synchronous pick-list change behind any pending one. */
@@ -436,6 +511,8 @@
     }));
     const materialChanged = !sameRgb(fileMaterial, material);
     material = fileMaterial;
+    if (!sameRgb(fileMaterial, WHITE)) materialChosen = true;
+    if (ranges.some((r) => r.material)) setMaterialRange(fileMaterial);
     // A material chosen after the import is queued behind it and already shown.
     if (inputs === materialInputs) materialInput = hex(fileMaterial);
     status = `Imported ${picks.length} pick${picks.length === 1 ? '' : 's'} (size ${section.size}) from ${name}${materialChanged ? `, on material ${hex(fileMaterial)}` : ''}.`;
@@ -468,12 +545,13 @@
     mappings: ReturnType<typeof mappings>;
     /** The material these mappings were made on: a result never mixes two materials (C2 a). */
     material: Rgb;
+    materialRanges: { pixel: Rgba; deltaE: number }[];
   }
 
   const recolorer = new Latest<RecolorRequest>(async (req) => {
     recoloring = true;
     const outcome = await client.call((api) =>
-      api.recolor(req.generation, req.revision, req.mappings, req.material),
+      api.recolor(req.generation, req.revision, req.mappings, req.material, req.materialRanges),
     );
     const current = req.generation === generation && req.revision === revision;
     recoloring = recolorer.busy && !current;
@@ -502,6 +580,7 @@
       revision,
       mappings: $state.snapshot(mappings(picks)),
       material,
+      materialRanges: ranges.map((r) => ({ pixel: $state.snapshot(r.pixel), deltaE: r.deltaE })),
     });
   }
 
@@ -625,7 +704,7 @@
 </header>
 
 <main class:dragging>
-  <section class="toolbar" aria-label="Image, material and zoom">
+  <section class="toolbar" aria-label="Image and zoom">
     <input
       bind:this={fileInput}
       id="file"
@@ -649,22 +728,6 @@
       {/if}
     </span>
     <span class="spacer"></span>
-    <div class="material" role="group" aria-label="Material">
-      <label title="The garment or surface color the image is printed on">
-        Material
-        <input
-          type="color"
-          value={materialInput}
-          oninput={(e) => setMaterial(fromHex(e.currentTarget.value))}
-          data-testid="material"
-        />
-      </label>
-      <button
-        type="button"
-        onclick={() => setMaterial(WHITE)}
-        disabled={materialInput === hex(WHITE)}>White</button
-      >
-    </div>
     <div class="zoom" role="group" aria-label="Zoom">
       <button type="button" onclick={() => zoomBy(1 / 1.5)} disabled={!image} aria-label="Zoom out"
         >−</button
@@ -686,12 +749,15 @@
 
   <section class="views">
     <ImageView
-      label="Original — click to pick a color, Shift-drag a circle to move it"
+      label={addingRange
+        ? 'Original — click a color to leave it unprinted (the material shows)'
+        : 'Original — click to pick a color, Shift-drag a circle to move it'}
       bitmap={original}
       {view}
       markers={picks.flatMap((p) =>
         moving?.id === p.id ? [moving] : p.at ? [{ id: p.id, ...p.at }] : [],
       )}
+      squares={ranges.flatMap((r) => (r.at ? [r.at] : []))}
       placeholder={opening
         ? 'Opening…'
         : 'Open, drop or paste an image (PNG, JPEG, WebP, GIF, AVIF…)'}
@@ -700,19 +766,20 @@
       onpick={pickAt}
       onmove={(move) => mover.update(move)}
       onmovecancel={(drag) => mover.cancel(drag)}
-      backdrop={css(material)}
+      backdrop={materialChosen ? css(material) : undefined}
     />
     <ImageView
       label={!image
         ? 'Preview'
         : picks.length === 0
           ? `No picks yet: the image as printed on ${onMaterial}`
-          : `Printed with ${picks.length} ink${picks.length === 1 ? '' : 's'}${recoloring ? ' · updating…' : ''}`}
+          : `Printed with ${picks.length} ink${picks.length === 1 ? '' : 's'}${ranges.length ? ` · ${ranges.length} color${ranges.length === 1 ? '' : 's'} left to the material` : ''}${recoloring ? ' · updating…' : ''}`}
       bitmap={result}
       {view}
       placeholder={image ? 'Recoloring…' : 'The preview appears here.'}
       onview={(v) => (view = v)}
       onviewport={() => {}}
+      backdrop={materialChosen ? css(material) : undefined}
     />
   </section>
 
@@ -737,30 +804,113 @@
     <button type="button" class="link" onclick={() => sizeDialog.close()}>Cancel</button>
   </dialog>
 
-  <section class="picks-section" aria-labelledby="picks-title">
-    <div class="picks-header">
-      <h2 id="picks-title">Picks</h2>
-      <input
-        bind:this={configInput}
-        type="file"
-        accept=".toml,application/toml,text/plain"
-        class="visually-hidden"
-        tabindex="-1"
-        aria-hidden="true"
-        onchange={onconfigchosen}
-      />
-      <button type="button" onclick={() => configInput.click()} disabled={!image}>
-        Import picks…
-      </button>
-      <button type="button" onclick={exportPicks} disabled={!image || picks.length === 0}>
-        Export picks
-      </button>
-      {#if picks.length > 0}
-        <button type="button" class="link" onclick={clearPicks}>Clear all</button>
+  <div class="bottom">
+    <section class="picks-section" aria-labelledby="picks-title">
+      <div class="picks-header">
+        <h2 id="picks-title">Picks</h2>
+        <input
+          bind:this={configInput}
+          type="file"
+          accept=".toml,application/toml,text/plain"
+          class="visually-hidden"
+          tabindex="-1"
+          aria-hidden="true"
+          onchange={onconfigchosen}
+        />
+        <button type="button" onclick={() => configInput.click()} disabled={!image}>
+          Import picks…
+        </button>
+        <button type="button" onclick={exportPicks} disabled={!image || picks.length === 0}>
+          Export picks
+        </button>
+        {#if picks.length > 0}
+          <button type="button" class="link" onclick={clearPicks}>Clear all</button>
+        {/if}
+      </div>
+      <PickList {picks} {material} onink={changeInk} onremove={removePick} />
+    </section>
+
+    <section class="material-section" aria-labelledby="material-title">
+      <h2 id="material-title">Material</h2>
+      <div class="material">
+        <label title="The garment or surface color the image is printed on">
+          Color
+          <span class="material-swatch" class:none={!materialChosen}>
+            <input
+              type="color"
+              value={materialInput}
+              oninput={(e) => setMaterial(fromHex(e.currentTarget.value))}
+              data-testid="material"
+            />
+          </span>
+          {#if !materialChosen}<span class="muted">none</span>{/if}
+        </label>
+        <button
+          type="button"
+          onclick={() => setMaterial(WHITE)}
+          disabled={materialChosen && materialInput === hex(WHITE)}>White</button
+        >
+        <button
+          type="button"
+          onclick={() => setMaterial(BLACK)}
+          disabled={materialChosen && materialInput === hex(BLACK)}>Black</button
+        >
+      </div>
+
+      <div class="unprinted-header">
+        <h3>Not printed <span class="muted">(the material shows)</span></h3>
+        <button
+          type="button"
+          class="add-range"
+          aria-pressed={addingRange}
+          aria-label="Leave a color unprinted"
+          title={addingRange
+            ? 'Click a color in the original (click + again to cancel)'
+            : 'Leave a color unprinted: click it in the original'}
+          disabled={!image}
+          onclick={() => (addingRange = !addingRange)}>+</button
+        >
+      </div>
+      {#if ranges.length === 0}
+        <p class="hint">
+          Colors the material already has don't need ink. Pick one in the original; it and the
+          colors within its ΔE show the material instead (□ on the original).
+        </p>
+      {:else}
+        <ol class="ranges" aria-label="Colors left to the material">
+          {#each ranges as range (range.id)}
+            {@const label = `rgb ${range.pixel.r}, ${range.pixel.g}, ${range.pixel.b}${range.pixel.a < 255 ? `, alpha ${range.pixel.a}` : ''}`}
+            <li class="range">
+              <span class="range-swatch" style:background={css(material)} title={label}>
+                <span style:background={cssAlpha(range.pixel)}></span>
+              </span>
+              <span class="range-color"
+                >{range.material ? `Material color · ${hex(range.pixel)}` : label}</span
+              >
+              <button
+                type="button"
+                class="remove"
+                aria-label="Print {label} again"
+                onclick={() => removeRange(range.id)}>×</button
+              >
+              <label class="range-delta">
+                ΔE
+                <input
+                  type="range"
+                  min="0"
+                  max="40"
+                  step="1"
+                  value={range.deltaE}
+                  oninput={(e) => setRangeDeltaE(range.id, Number(e.currentTarget.value))}
+                />
+                <output>{range.deltaE}</output>
+              </label>
+            </li>
+          {/each}
+        </ol>
       {/if}
-    </div>
-    <PickList {picks} {material} onink={changeInk} onremove={removePick} />
-  </section>
+    </section>
+  </div>
 </main>
 
 <style>
@@ -808,6 +958,53 @@
     align-items: center;
     gap: 0.25rem;
   }
+  /* Bottom: picks on the left (as many columns as fit), material on the right (one column). */
+  .bottom {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(16rem, 22rem);
+    gap: 1rem 2rem;
+    align-items: start;
+  }
+  @media (max-width: 800px) {
+    .bottom {
+      grid-template-columns: 1fr;
+    }
+  }
+  .material-section {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.6rem;
+  }
+  .material-section h2 {
+    margin: 0;
+  }
+  h3 {
+    font-size: 1rem;
+    margin: 0;
+  }
+  .unprinted-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.6rem;
+  }
+  .add-range {
+    font-size: 1.2rem;
+    line-height: 1;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+  }
+  .muted,
+  .hint {
+    color: var(--muted);
+    font-weight: normal;
+  }
+  .hint {
+    margin: 0;
+    font-size: 0.9rem;
+  }
   .material,
   .material label {
     display: flex;
@@ -818,9 +1015,97 @@
     color: var(--muted);
     font-size: 0.9rem;
   }
-  .material input {
+  .add-range[aria-pressed='true'] {
+    outline: 2px solid var(--accent);
+  }
+  .ranges {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+  }
+  .range {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 0.4rem 0.75rem;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+  }
+  .range-delta {
+    grid-column: 2 / -1;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--muted);
+  }
+  .range-delta input {
+    flex: 1;
+    min-width: 0;
+  }
+  .range-delta output {
+    min-width: 2ch;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg);
+  }
+  .range .remove {
+    font-size: 1.3rem;
+    line-height: 1;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .range .remove:hover {
+    border-color: var(--border);
+    color: var(--fg);
+  }
+  .range-swatch {
+    grid-row: span 2;
+    display: inline-block;
+    width: 2rem;
+    height: 2rem;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .range-swatch > span {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  .material-swatch {
+    position: relative;
+    display: inline-block;
     width: 2.2rem;
     height: 1.8rem;
+    border-radius: 4px;
+  }
+  /* No material yet: a transparent (checkerboard) swatch; the picker still opens on click. */
+  .material-swatch.none {
+    border: 1px solid var(--border);
+    background:
+      repeating-conic-gradient(var(--checker) 0% 25%, transparent 0% 50%) 50% / 10px 10px,
+      var(--surface);
+  }
+  .material-swatch.none input {
+    opacity: 0;
+  }
+  .material input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
     padding: 0;
     border: 1px solid var(--border);
     border-radius: 4px;

@@ -82,8 +82,10 @@ impl SourceImage {
     /// match takes its own ink; ties go to the earlier mapping); the output is opaque. With **no
     /// mappings** the output is the composited copy (the image as it looks on the material); with
     /// **one mapping** every pixel takes that ink. ΔE is bit-identical to a native build, so ties
-    /// resolve the same way.
-    /// At most 256 mappings (the palette-config limit), since the work grows with each one.
+    /// resolve the same way. Pixels within a `materialRanges` entry show the material instead
+    /// (prototype; checked first).
+    /// At most 256 mappings (the palette-config limit), since the work grows with each one; the
+    /// same for ranges.
     pub fn recolor(&self, request: Ts<RecolorRequest>, out: &mut [u8]) -> RecolorOutcome {
         let outcome = request
             .to_rust()
@@ -99,12 +101,40 @@ impl SourceImage {
                         ),
                     });
                 }
+                if request.material_ranges.len() > rekolor_config::MAX_PICKS {
+                    return Err(ErrorInfo {
+                        kind: crate::ErrorKind::TooManyMappings,
+                        message: format!(
+                            "{} material ranges; at most {} are allowed",
+                            request.material_ranges.len(),
+                            rekolor_config::MAX_PICKS
+                        ),
+                    });
+                }
+                let ranges = request
+                    .material_ranges
+                    .iter()
+                    .map(|r| {
+                        if (0.0..=100.0).contains(&r.delta_e) {
+                            Ok(core::MaterialRange {
+                                pixel: r.pixel.into(),
+                                delta_e: r.delta_e,
+                            })
+                        } else {
+                            Err(ErrorInfo {
+                                kind: crate::ErrorKind::InvalidInput,
+                                message: format!("deltaE must be from 0 to 100, got {}", r.delta_e),
+                            })
+                        }
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
                 let mappings: Vec<core::Mapping> =
                     request.mappings.into_iter().map(Into::into).collect();
-                Ok(crate::RecolorStats::from(core::recolor(
+                Ok(crate::RecolorStats::from(core::recolor_with_ranges(
                     self.view(),
                     &mappings,
                     request.material.into(),
+                    &ranges,
                     out,
                 )?))
             });

@@ -14,6 +14,7 @@ import type {
   ConfigPick,
   ConfigSection,
   Mapping,
+  MaterialRange,
   PaletteMatch,
   ParsedConfig,
   Pick,
@@ -131,10 +132,11 @@ export class Session {
     revision: number,
     mappings: Mapping[],
     material: Rgb,
+    materialRanges: MaterialRange[] = [],
   ): Promise<AppOutcome<Recolored>> {
     const size = this.#engine.image;
     if (generation !== this.#current || !size) return superseded();
-    const result = this.#engine.recolor(mappings, material);
+    const result = this.#engine.recolor(mappings, material, materialRanges);
     if (result.status === 'error') return result;
     this.#output = { generation, revision, rgba: result.value };
     const bitmap = await this.#codec.toBitmap(result.value, size.width, size.height);

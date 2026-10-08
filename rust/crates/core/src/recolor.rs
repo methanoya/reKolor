@@ -1,5 +1,5 @@
 use crate::color::{Lab, delta_e_2000_lab, lab};
-use crate::{Error, ImageRef, Rgb8, composite};
+use crate::{Error, ImageRef, Rgb8, Rgba8, composite};
 
 /// One picked color and the ink that replaces it (`from` → `to` in the 2023 UI).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -8,10 +8,22 @@ pub struct Mapping {
     pub ink: Rgb8,
 }
 
+/// A color left to the material (prototype, 2026-10-08): pixels whose composited color is within
+/// `delta_e` (CIEDE2000) of `pixel` composited over the material are not printed; they show the
+/// material. Saves ink where the material already has the color.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MaterialRange {
+    /// A pixel from the image, as stored (composited over the material on each call).
+    pub pixel: Rgba8,
+    pub delta_e: f32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RecolorStats {
     /// Pixels whose composited color equals a mapping's source exactly.
     pub exact: u64,
+    /// Pixels left to the material by a [`MaterialRange`].
+    pub material: u64,
     /// All other pixels.
     pub nearest: u64,
 }
@@ -34,6 +46,18 @@ pub fn recolor(
     material: Rgb8,
     out: &mut [u8],
 ) -> Result<RecolorStats, Error> {
+    recolor_with_ranges(image, mappings, material, &[], out)
+}
+
+/// [`recolor`], plus colors left to the material (prototype): a pixel within a range's ΔE shows
+/// the material and takes no ink. Ranges are checked first, so they win over an exact pick.
+pub fn recolor_with_ranges(
+    image: ImageRef<'_>,
+    mappings: &[Mapping],
+    material: Rgb8,
+    ranges: &[MaterialRange],
+    out: &mut [u8],
+) -> Result<RecolorStats, Error> {
     let input = image.as_bytes();
     if out.len() != input.len() {
         return Err(Error::OutputLength {
@@ -43,6 +67,10 @@ pub fn recolor(
     }
 
     let inks: Vec<(Mapping, Lab)> = mappings.iter().map(|&m| (m, lab(m.ink))).collect();
+    let ranges: Vec<(Lab, f32)> = ranges
+        .iter()
+        .map(|r| (lab(composite(r.pixel, material)), r.delta_e))
+        .collect();
     let pixel_count = input.len() / 4;
     let mut memo =
         (pixel_count > MEMO_MIN_PIXELS && !inks.is_empty() && inks.len() < MEMO_MAX_INKS)
@@ -50,24 +78,30 @@ pub fn recolor(
     let mut stats = RecolorStats::default();
     for (pixel, dst) in image.pixels().zip(out.as_chunks_mut::<4>().0) {
         let color = composite(pixel, material);
-        let (ink, exact) = match memo.as_deref_mut() {
-            Some(memo) => memoized(memo, &inks, color),
-            None => lookup(&inks, color),
+        let (ink, kind) = match memo.as_deref_mut() {
+            Some(memo) => memoized(memo, &inks, &ranges, material, color),
+            None if in_range(&ranges, color) => (material, Kind::Material),
+            None => match lookup(&inks, color) {
+                (ink, true) => (ink, Kind::Exact),
+                (ink, false) => (ink, Kind::Nearest),
+            },
         };
         *dst = [ink.r, ink.g, ink.b, 255];
-        if exact {
-            stats.exact += 1;
-        } else {
-            stats.nearest += 1;
+        match kind {
+            Kind::Exact => stats.exact += 1,
+            Kind::Material => stats.material += 1,
+            Kind::Nearest => stats.nearest += 1,
         }
     }
     log::debug!(
-        "recolor: {}×{} on {:?}, {} mappings, exact {}, nearest {}",
+        "recolor: {}×{} on {:?}, {} mappings, {} ranges, exact {}, material {}, nearest {}",
         image.width(),
         image.height(),
         material,
         mappings.len(),
+        ranges.len(),
         stats.exact,
+        stats.material,
         stats.nearest
     );
     Ok(stats)
@@ -79,25 +113,61 @@ const MEMO_MIN_PIXELS: usize = 1 << 16;
 /// The memo stores `mapping index + 1` in 15 bits.
 const MEMO_MAX_INKS: usize = 0x7fff;
 const MEMO_EXACT: u16 = 0x8000;
+/// Left to the material: `0x7fff` is never `index + 1` (at most `MEMO_MAX_INKS - 1` mappings).
+const MEMO_MATERIAL: u16 = 0x7fff;
 
-/// [`lookup`] remembered per composited color (one `u16` for each of the 2^24 colors: 0 = not yet
-/// computed, else the mapping index + 1, with [`MEMO_EXACT`] for exact matches). The answer depends
-/// only on the color, so results are identical; images repeat colors, so most pixels skip the
-/// CIEDE2000 work. Memory is fixed (32 MiB) whatever the image.
-fn memoized(memo: &mut [u16], inks: &[(Mapping, Lab)], color: Rgb8) -> (Rgb8, bool) {
+/// How a pixel was decided, for [`RecolorStats`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Exact,
+    Material,
+    Nearest,
+}
+
+/// Whether a composited color is within a material range.
+fn in_range(ranges: &[(Lab, f32)], color: Rgb8) -> bool {
+    if ranges.is_empty() {
+        return false;
+    }
+    let color_lab = lab(color);
+    ranges
+        .iter()
+        .any(|&(center, delta_e)| delta_e_2000_lab(color_lab, center) <= delta_e)
+}
+
+/// [`in_range`] and [`lookup`] remembered per composited color (one `u16` for each of the 2^24
+/// colors: 0 = not yet computed, [`MEMO_MATERIAL`] = left to the material, else the mapping
+/// index + 1, with [`MEMO_EXACT`] for exact matches). The answer depends only on the color, so
+/// results are identical; images repeat colors, so most pixels skip the CIEDE2000 work. Memory is
+/// fixed (32 MiB) whatever the image.
+fn memoized(
+    memo: &mut [u16],
+    inks: &[(Mapping, Lab)],
+    ranges: &[(Lab, f32)],
+    material: Rgb8,
+    color: Rgb8,
+) -> (Rgb8, Kind) {
     let key = (usize::from(color.r) << 16) | (usize::from(color.g) << 8) | usize::from(color.b);
     let entry = memo[key];
+    if entry == MEMO_MATERIAL {
+        return (material, Kind::Material);
+    }
+    let kind = |exact| if exact { Kind::Exact } else { Kind::Nearest };
     if entry != 0 {
         return (
             inks[usize::from(entry & !MEMO_EXACT) - 1].0.ink,
-            entry & MEMO_EXACT != 0,
+            kind(entry & MEMO_EXACT != 0),
         );
+    }
+    if in_range(ranges, color) {
+        memo[key] = MEMO_MATERIAL;
+        return (material, Kind::Material);
     }
     let (index, exact) = lookup_index(inks, color);
     // `inks` is non-empty when the memo is used, so `lookup_index` always finds an index.
     let index = index.expect("memo is only used with mappings");
     memo[key] = (index as u16 + 1) | if exact { MEMO_EXACT } else { 0 };
-    (inks[index].0.ink, exact)
+    (inks[index].0.ink, kind(exact))
 }
 
 /// The ink for one composited pixel color, and whether it was an exact source match.

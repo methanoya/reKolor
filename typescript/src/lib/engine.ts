@@ -15,6 +15,7 @@ import {
   type ParsedConfig,
   type ResolvedPick,
   type Mapping,
+  type MaterialRange,
   type Outcome,
   type PaletteMatch,
   type Pick,
@@ -147,12 +148,16 @@ export class Engine {
 
   /**
    * Recolors the current image on the material into a new opaque RGBA buffer (transferable to the
-   * main thread).
+   * main thread). Pixels within a material range show the material (prototype).
    */
-  recolor(mappings: Mapping[], material: Rgb): AppOutcome<Uint8Array<ArrayBuffer>> {
+  recolor(
+    mappings: Mapping[],
+    material: Rgb,
+    materialRanges: MaterialRange[] = [],
+  ): AppOutcome<Uint8Array<ArrayBuffer>> {
     if (!this.#image) return err('noImage', 'no image is open');
     const out = new Uint8Array(this.#image.width * this.#image.height * 4);
-    const outcome = fromWasm(this.#image.recolor({ mappings, material }, out));
+    const outcome = fromWasm(this.#image.recolor({ mappings, material, materialRanges }, out));
     return outcome.status === 'ok' ? ok(out) : outcome;
   }
 }

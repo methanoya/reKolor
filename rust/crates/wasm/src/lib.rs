@@ -29,8 +29,8 @@ pub use outcome::{
 pub use palette::Palette;
 pub use palette::PaletteOutcome;
 pub use types::{
-    ColorCount, ColorMismatch, ImageStats, Mapping, PaletteData, PaletteEntry, PaletteMatch,
-    PaletteMatches, Pick, RecolorRequest, RecolorStats, Rgb, Rgba,
+    ColorCount, ColorMismatch, ImageStats, Mapping, MaterialRange, PaletteData, PaletteEntry,
+    PaletteMatch, PaletteMatches, Pick, RecolorRequest, RecolorStats, Rgb, Rgba,
 };
 
 use wasm_bindgen::prelude::*;

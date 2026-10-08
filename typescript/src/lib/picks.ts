@@ -19,6 +19,7 @@ export interface PickEntry {
 
 /** The default material: compositing over it is the behavior from before the material color. */
 export const WHITE: Rgb = Object.freeze({ r: 255, g: 255, b: 255 });
+export const BLACK: Rgb = Object.freeze({ r: 0, g: 0, b: 0 });
 
 export const css = ({ r, g, b }: Rgb) => `rgb(${r} ${g} ${b})`;
 export const cssAlpha = ({ r, g, b, a }: Rgba) => `rgb(${r} ${g} ${b} / ${(a / 255).toFixed(3)})`;
@@ -35,6 +36,18 @@ export const sameRgb = (a: Rgb, b: Rgb) => a.r === b.r && a.g === b.g && a.b ===
 
 export const mappings = (picks: PickEntry[]): Mapping[] =>
   picks.map((p) => ({ source: p.matching, ink: p.ink.rgb }));
+
+/** A color left to the material (prototype): pixels within `deltaE` of it are not printed. */
+export interface RangeEntry {
+  id: number;
+  /** The clicked pixel, as stored (composited over the material in Rust on each recolor). */
+  pixel: Rgba;
+  deltaE: number;
+  /** Where it was clicked (a square marker on the original); absent for the material's range. */
+  at?: { x: number; y: number };
+  /** The material's own color: added when a material is chosen, and follows it. */
+  material?: boolean;
+}
 
 /** A Shift-drag of a pick's marker to the source pixel (x, y); `done` on release. */
 export interface PickMove {

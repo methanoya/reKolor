@@ -7,6 +7,7 @@ import init, {
   type ConfigPick,
   type ConfigSection,
   type Mapping,
+  type MaterialRange,
   type Rgb,
   type Rgba,
 } from 'rekolor-wasm';
@@ -57,8 +58,16 @@ const api = {
   rematch: (picks: { pixel: Rgba; matching: Rgb }[], material: Rgb) =>
     withSession((s) => s.rematch(picks, material)),
   nearest: (color: Rgb, k?: number) => withSession((s) => s.nearest(color, k)),
-  recolor: async (generation: number, revision: number, mappings: Mapping[], material: Rgb) =>
-    transferBitmap(await withSession((s) => s.recolor(generation, revision, mappings, material))),
+  recolor: async (
+    generation: number,
+    revision: number,
+    mappings: Mapping[],
+    material: Rgb,
+    materialRanges?: MaterialRange[],
+  ) =>
+    transferBitmap(
+      await withSession((s) => s.recolor(generation, revision, mappings, material, materialRanges)),
+    ),
   encodePng: (generation: number, revision: number) =>
     withSession((s) => s.encodePng(generation, revision)),
   parseConfig: (text: string) => withSession((s) => s.parseConfig(text)),

@@ -26,12 +26,27 @@ pub struct Mapping {
     pub ink: Rgb,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+/// A color left to the material (prototype): pixels within `deltaE` (CIEDE2000) of `pixel`
+/// composited over the material are not printed; they show the material.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Tsify)]
+#[serde(rename_all = "camelCase")]
+pub struct MaterialRange {
+    /// A pixel from the image, as stored.
+    pub pixel: Rgba,
+    /// From 0 to 100.
+    pub delta_e: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Tsify)]
 pub struct RecolorRequest {
     pub mappings: Vec<Mapping>,
     /// The material color the image is composited over (the garment or substrate). Required: white
     /// reproduces the behavior from before the material.
     pub material: Rgb,
+    /// Colors left to the material, checked before the mappings (prototype). None if absent.
+    #[tsify(optional)]
+    #[serde(default, rename = "materialRanges")]
+    pub material_ranges: Vec<MaterialRange>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Tsify)]
