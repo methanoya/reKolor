@@ -13,6 +13,7 @@
 import type {
   ConfigPick,
   ConfigSection,
+  ConfigUnprinted,
   Mapping,
   MaterialRange,
   PaletteMatch,
@@ -179,7 +180,12 @@ export class Session {
     );
   }
 
-  exportConfig(imageName: string, material: Rgb, picks: ConfigPick[]): AppOutcome<string> {
-    return this.#engine.exportConfig(imageName, material, picks);
+  exportConfig(
+    imageName: string,
+    material: Rgb,
+    picks: ConfigPick[],
+    unprinted?: ConfigUnprinted[],
+  ): AppOutcome<string> {
+    return this.#engine.exportConfig(imageName, material, picks, unprinted);
   }
 }

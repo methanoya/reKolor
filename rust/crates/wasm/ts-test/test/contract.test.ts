@@ -278,6 +278,7 @@ describe('palette configs (W10 v)', () => {
     expect(exported).toContain('\nmaterial = [255, 255, 255]\n');
     expect(unwrap(parseConfig(exported))).toEqual({
       material: WHITE,
+      unprinted: [],
       sections: [{ size: section.picks.length, picks: section.picks }],
     });
     palette.free();
@@ -369,5 +370,52 @@ describe('the material color', () => {
     expect(text).toContain('\nmaterial = [0, 0, 0]\n');
     expect(unwrap(parseConfig(text)).material).toEqual(BLACK);
     palette.free();
+  });
+
+  test('materialRanges leave pixels unprinted: transparent in the output, and checked', () => {
+    // Transparent (hiding 9,9,9), opaque red, opaque black; on black with the material's own range.
+    const image = unwrap(
+      SourceImage.create(new Uint8Array([9, 9, 9, 0, 230, 76, 60, 255, 0, 0, 0, 255]), 3, 1),
+    );
+    const out = new Uint8Array(12);
+    const range = (deltaE: number) => ({ pixel: { ...BLACK, a: 255 }, deltaE });
+    unwrap(image.recolor({ mappings: [], material: BLACK, materialRanges: [range(10)] }, out));
+    expect([...out]).toEqual([0, 0, 0, 0, 230, 76, 60, 255, 0, 0, 0, 0]);
+    // Optional: without it, nothing is left unprinted.
+    unwrap(image.recolor({ mappings: [], material: BLACK }, out));
+    expect([...out]).toEqual([0, 0, 0, 255, 230, 76, 60, 255, 0, 0, 0, 255]);
+    for (const deltaE of [-1, 100.5, NaN]) {
+      const outcome = image.recolor(
+        { mappings: [], material: BLACK, materialRanges: [range(deltaE)] },
+        out,
+      );
+      expect(outcome, `deltaE ${deltaE}`).toMatchObject({
+        status: 'error',
+        error: { kind: 'invalidInput' },
+      });
+    }
+  });
+});
+
+describe('unprinted colors in configs (material-color K8)', () => {
+  test('are read as a tagged union and written back, always', () => {
+    const text =
+      'material = [0, 0, 0]\nunprinted = [\n' +
+      '  { material = true, delta_e = 10 },\n' +
+      '  { rgba = [200, 40, 40, 255], delta_e = 12.5 },\n]\n\n' +
+      '[[palette]]\nsize = 1\npicks = []\n';
+    const parsed = unwrap(parseConfig(text));
+    expect(parsed.unprinted).toEqual([
+      { kind: 'material', deltaE: 10 },
+      { kind: 'color', rgba: { r: 200, g: 40, b: 40, a: 255 }, deltaE: 12.5 },
+    ]);
+    const out = unwrap(
+      serializeConfig({ imageName: 'x.png', material: BLACK, unprinted: parsed.unprinted, picks: [] }),
+    ).text;
+    expect(unwrap(parseConfig(out)).unprinted).toEqual(parsed.unprinted);
+    // Without the field: written as none.
+    const none = unwrap(serializeConfig({ imageName: 'x.png', material: BLACK, picks: [] })).text;
+    expect(none).toContain('\nunprinted = []\n');
+    expect(unwrap(parseConfig('[[palette]]\nsize = 1\npicks = []\n')).unprinted).toEqual([]);
   });
 });

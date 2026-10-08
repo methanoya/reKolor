@@ -37,12 +37,14 @@ export const sameRgb = (a: Rgb, b: Rgb) => a.r === b.r && a.g === b.g && a.b ===
 export const mappings = (picks: PickEntry[]): Mapping[] =>
   picks.map((p) => ({ source: p.matching, ink: p.ink.rgb }));
 
-/** A color left to the material (prototype): pixels within `deltaE` of it are not printed. */
+/** A color left unprinted (U1): pixels within `deltaE` of it take no ink; the material shows. */
 export interface RangeEntry {
   id: number;
   /** The clicked pixel, as stored (composited over the material in Rust on each recolor). */
   pixel: Rgba;
   deltaE: number;
+  /** The slider's maximum: 40, or 100 for an entry that came from a file above 40 (R2 a). */
+  maxDeltaE: number;
   /** Where it was clicked (a square marker on the original); absent for the material's range. */
   at?: { x: number; y: number };
   /** The material's own color: added when a material is chosen, and follows it. */

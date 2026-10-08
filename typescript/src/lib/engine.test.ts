@@ -148,6 +148,24 @@ describe('Engine', () => {
     });
     engine.dispose();
   });
+
+  test('colors left unprinted are transparent in the output', () => {
+    const engine = value(Engine.create(palette));
+    value(engine.open(redAndClear(), 2, 1));
+    // The material's own color (what the app adds when a material is chosen): the transparent
+    // pixel is the material, so it takes no ink.
+    const ranges = [{ pixel: { ...BLACK, a: 255 }, deltaE: 10 }];
+    const ink = { r: 58, g: 117, b: 196 };
+    const mappings = [{ source: { r: 230, g: 76, b: 60 }, ink }];
+    expect([...value(engine.recolor(mappings, BLACK, ranges))]).toEqual([
+      58, 117, 196, 255, 0, 0, 0, 0,
+    ]);
+    // Without ranges (the default), it takes the ink like any other pixel.
+    expect([...value(engine.recolor(mappings, BLACK))]).toEqual([
+      58, 117, 196, 255, 58, 117, 196, 255,
+    ]);
+    engine.dispose();
+  });
 });
 
 describe('Engine configs (W10 v)', () => {
@@ -175,8 +193,21 @@ describe('Engine configs (W10 v)', () => {
     );
     expect(value(engine.parseConfig(text))).toEqual({
       material: WHITE,
+      unprinted: [],
       sections: [{ size: section.picks.length, picks: section.picks }],
     });
+    engine.dispose();
+  });
+
+  test('unprinted colors are exported and read back (K8)', () => {
+    const engine = value(Engine.create(palette));
+    const unprinted = [
+      { kind: 'material' as const, deltaE: 10 },
+      { kind: 'color' as const, rgba: { r: 200, g: 40, b: 40, a: 255 }, deltaE: 12.5 },
+    ];
+    const text = value(engine.exportConfig('x.png', BLACK, [], unprinted));
+    expect(text).toContain('{ material = true, delta_e = 10 }');
+    expect(value(engine.parseConfig(text)).unprinted).toEqual(unprinted);
     engine.dispose();
   });
 

@@ -17,8 +17,8 @@ mod palette;
 mod types;
 
 pub use config::{
-    ConfigExport, ConfigPick, ConfigSection, ConfigText, ParsedConfig, ResolvedPick, ResolvedPicks,
-    parse_config, serialize_config,
+    ConfigExport, ConfigPick, ConfigSection, ConfigText, ConfigUnprinted, ParsedConfig,
+    ResolvedPick, ResolvedPicks, parse_config, serialize_config,
 };
 pub use image::SourceImageOutcome;
 pub use image::{SourceImage, composite};

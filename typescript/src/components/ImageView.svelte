@@ -22,7 +22,7 @@
     view: View;
     /** Source pixels to mark (picks made by clicking), by pick id. */
     markers?: { id: number; x: number; y: number }[];
-    /** Source pixels to mark with a square (colors left unprinted, prototype); not movable. */
+    /** Source pixels to mark with a square (colors left unprinted, U3); not movable. */
     squares?: { x: number; y: number }[];
     placeholder: string;
     onview: (view: View) => void;

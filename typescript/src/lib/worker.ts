@@ -6,6 +6,7 @@ import * as Comlink from 'comlink';
 import init, {
   type ConfigPick,
   type ConfigSection,
+  type ConfigUnprinted,
   type Mapping,
   type MaterialRange,
   type Rgb,
@@ -73,8 +74,12 @@ const api = {
   parseConfig: (text: string) => withSession((s) => s.parseConfig(text)),
   resolveSection: (section: ConfigSection, material: Rgb) =>
     withSession((s) => s.resolveSection(section, material)),
-  exportConfig: (imageName: string, material: Rgb, picks: ConfigPick[]) =>
-    withSession((s) => s.exportConfig(imageName, material, picks)),
+  exportConfig: (
+    imageName: string,
+    material: Rgb,
+    picks: ConfigPick[],
+    unprinted?: ConfigUnprinted[],
+  ) => withSession((s) => s.exportConfig(imageName, material, picks, unprinted)),
 };
 
 export type WorkerApi = typeof api;

@@ -11,6 +11,7 @@ import {
   serializeConfig,
   type ConfigPick,
   type ConfigSection,
+  type ConfigUnprinted,
   type ImageStats,
   type ParsedConfig,
   type ResolvedPick,
@@ -140,15 +141,23 @@ export class Engine {
     return outcome.status === 'ok' ? ok(outcome.value.picks) : outcome;
   }
 
-  /** The picks as a config file with the material and one section (`size` = the number of picks). */
-  exportConfig(imageName: string, material: Rgb, picks: ConfigPick[]): AppOutcome<string> {
-    const outcome = fromWasm(serializeConfig({ imageName, material, picks }));
+  /**
+   * The picks as a config file with the material, the unprinted colors and one section (`size` =
+   * the number of picks).
+   */
+  exportConfig(
+    imageName: string,
+    material: Rgb,
+    picks: ConfigPick[],
+    unprinted: ConfigUnprinted[] = [],
+  ): AppOutcome<string> {
+    const outcome = fromWasm(serializeConfig({ imageName, material, unprinted, picks }));
     return outcome.status === 'ok' ? ok(outcome.value.text) : outcome;
   }
 
   /**
    * Recolors the current image on the material into a new opaque RGBA buffer (transferable to the
-   * main thread). Pixels within a material range show the material (prototype).
+   * main thread). Pixels within a material range take no ink and are transparent (U1, U8).
    */
   recolor(
     mappings: Mapping[],

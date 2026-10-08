@@ -3,8 +3,10 @@
 
 import type {
   ConfigSection,
+  ConfigUnprinted,
   ErrorKind,
   ImageStats,
+  MaterialRange,
   Outcome,
   Pick,
   RecolorStats,
@@ -81,5 +83,21 @@ const badSection: ConfigSection = { size: 1, picks: [{ rgba: [1, 2, 3, 4], ink: 
 void badSection;
 const configKind: ErrorKind = 'invalidConfig';
 void configKind;
+
+// A material range is a stored pixel (RGBA) and a ΔE; `materialRanges` is optional.
+const range: MaterialRange = { pixel: { r: 0, g: 0, b: 0, a: 255 }, deltaE: 10 };
+image.recolor({ mappings: [], material: white, materialRanges: [range] }, new Uint8Array(4));
+// @ts-expect-error
+image.recolor({ mappings: [], material: white, materialRanges: [{ pixel: white, deltaE: 1 }] }, new Uint8Array(4));
+
+// An unprinted color in a config is either a stored color or the material's own color.
+const unprinted: ConfigUnprinted[] = [
+  { kind: 'material', deltaE: 10 },
+  { kind: 'color', rgba: { r: 1, g: 2, b: 3, a: 255 }, deltaE: 2 },
+];
+void unprinted;
+// @ts-expect-error
+const noColor: ConfigUnprinted = { kind: 'color', deltaE: 2 };
+void noColor;
 
 export {};

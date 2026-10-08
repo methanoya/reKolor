@@ -2,7 +2,11 @@
 //! app (import/export through `rekolor-wasm`), so both read and validate files the same way.
 //!
 //! ```toml
-//! material = [255, 255, 255]
+//! material = [0, 0, 0]
+//! unprinted = [
+//!   { material = true, delta_e = 10 },
+//!   { rgba = [200, 40, 40, 255], delta_e = 12.5 },
+//! ]
 //!
 //! [[palette]]
 //! size = 3
@@ -12,8 +16,10 @@
 //! ```
 //!
 //! `material` is the color the picks are composited over (the garment or substrate): read as white
-//! when absent, always written (material-color decisions M4 b, M4.1 a). It applies to every
-//! section. Each pick is a pixel color (straight-alpha RGBA, as stored in the image) and the
+//! when absent, always written (material-color decisions M4 b, M4.1 a). `unprinted` lists the colors
+//! left unprinted (U1, K8): a stored pixel color and a ΔE, or the material's own color
+//! (`material = true`, which follows the material); none when absent, always written. Both apply to
+//! every section. Each pick is a pixel color (straight-alpha RGBA, as stored in the image) and the
 //! palette entry it maps to, by name. "Size" is the requested number of distinct inks; a palette
 //! may list fewer picks ("up to N"), and several picks may share one ink.
 //!
@@ -21,7 +27,7 @@
 
 use std::collections::HashSet;
 
-use rekolor_core::{Mapping, Palette, Rgb8, Rgba8, composite};
+use rekolor_core::{Mapping, MaterialRange, Palette, Rgb8, Rgba8, composite};
 use serde::Deserialize;
 
 /// Largest accepted config text (owner decision WA1 a).
@@ -30,14 +36,79 @@ pub const MAX_BYTES: usize = 256 * 1024;
 pub const MAX_SECTIONS: usize = 64;
 /// Most picks in one section.
 pub const MAX_PICKS: usize = 256;
+/// Most unprinted colors in one config (the same limit as picks).
+pub const MAX_UNPRINTED: usize = 256;
+/// The ΔE a new unprinted color starts with (the app's default too).
+pub const DEFAULT_UNPRINTED_DELTA_E: f32 = 10.0;
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PaletteConfig {
     /// The material color, `[r, g, b]`; white when the file has no `material` line.
     #[serde(default = "white")]
     pub material: [u8; 3],
+    /// Colors left unprinted, for every section; none when the file has no `unprinted` line.
+    #[serde(default)]
+    pub unprinted: Vec<Unprinted>,
     pub palette: Vec<SizedPalette>,
+}
+
+/// A color left unprinted (material-color U1, K8): pixels within `delta_e` (CIEDE2000) of it take
+/// no ink. In the file: `{ rgba = [r, g, b, a], delta_e = 10 }` or `{ material = true, delta_e = 10 }`.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(try_from = "RawUnprinted")]
+pub enum Unprinted {
+    /// A stored pixel color from the image (straight-alpha RGBA).
+    Color { rgba: [u8; 4], delta_e: f32 },
+    /// The material's own color, whatever the material is.
+    Material { delta_e: f32 },
+}
+
+impl Unprinted {
+    pub fn delta_e(&self) -> f32 {
+        match *self {
+            Unprinted::Color { delta_e, .. } | Unprinted::Material { delta_e } => delta_e,
+        }
+    }
+
+    /// The engine's range on `material` (the material's own entry becomes that color, opaque).
+    pub fn range(&self, material: Rgb8) -> MaterialRange {
+        let pixel = match *self {
+            Unprinted::Color { rgba, .. } => Rgba8::from(rgba),
+            Unprinted::Material { .. } => Rgba8::new(material.r, material.g, material.b, 255),
+        };
+        MaterialRange {
+            pixel,
+            delta_e: self.delta_e(),
+        }
+    }
+}
+
+/// An `unprinted` entry as written: exactly one of `rgba` and `material = true`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawUnprinted {
+    rgba: Option<[u8; 4]>,
+    #[serde(default)]
+    material: bool,
+    delta_e: f32,
+}
+
+impl TryFrom<RawUnprinted> for Unprinted {
+    type Error = String;
+
+    fn try_from(raw: RawUnprinted) -> Result<Self, Self::Error> {
+        match (raw.rgba, raw.material) {
+            (Some(rgba), false) => Ok(Unprinted::Color {
+                rgba,
+                delta_e: raw.delta_e,
+            }),
+            (None, true) => Ok(Unprinted::Material {
+                delta_e: raw.delta_e,
+            }),
+            _ => Err("an unprinted color needs either `rgba` or `material = true`".into()),
+        }
+    }
 }
 
 fn white() -> [u8; 3] {
@@ -69,7 +140,7 @@ pub struct ResolvedPick {
     pub index: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ConfigError {
     #[error("the config is {bytes} bytes; at most {max} are allowed", max = MAX_BYTES)]
     TooLarge { bytes: usize },
@@ -87,6 +158,12 @@ pub enum ConfigError {
     MissingSize(u32),
     #[error("ink {0:?} is not in the palette")]
     UnknownInk(String),
+    #[error("{count} unprinted colors; at most {max} are allowed", max = MAX_UNPRINTED)]
+    TooManyUnprinted { count: usize },
+    #[error("an unprinted color's delta_e must be from 0 to 100, got {0}")]
+    UnprintedDeltaE(f32),
+    #[error("the material is listed as unprinted more than once")]
+    DuplicateMaterialUnprinted,
 }
 
 impl PaletteConfig {
@@ -104,6 +181,25 @@ impl PaletteConfig {
 
     /// The structural rules of [`parse`](Self::parse), for configs built in code.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.unprinted.len() > MAX_UNPRINTED {
+            return Err(ConfigError::TooManyUnprinted {
+                count: self.unprinted.len(),
+            });
+        }
+        for entry in &self.unprinted {
+            let delta_e = entry.delta_e();
+            if !(0.0..=100.0).contains(&delta_e) {
+                return Err(ConfigError::UnprintedDeltaE(delta_e));
+            }
+        }
+        let materials = self
+            .unprinted
+            .iter()
+            .filter(|u| matches!(u, Unprinted::Material { .. }))
+            .count();
+        if materials > 1 {
+            return Err(ConfigError::DuplicateMaterialUnprinted);
+        }
         if self.palette.len() > MAX_SECTIONS {
             return Err(ConfigError::TooManySections {
                 count: self.palette.len(),
@@ -126,12 +222,37 @@ impl PaletteConfig {
             .ok_or(ConfigError::MissingSize(size))
     }
 
+    /// The engine's ranges for the unprinted colors on `material` (the config's, or an override).
+    pub fn ranges(&self, material: Rgb8) -> Vec<MaterialRange> {
+        self.unprinted.iter().map(|u| u.range(material)).collect()
+    }
+
     /// Writes the config in the simple format: each header line as a `# ` comment, the material
-    /// (white too), then the sections in order.
+    /// (white too), the unprinted colors (none too), then the sections in order.
     pub fn to_toml(&self, header: &[&str]) -> String {
         let mut out: String = header.iter().map(|line| format!("# {line}\n")).collect();
         let [r, g, b] = self.material;
         out.push_str(&format!("\nmaterial = [{r}, {g}, {b}]\n"));
+        if self.unprinted.is_empty() {
+            out.push_str("unprinted = []\n");
+        } else {
+            out.push_str("unprinted = [\n");
+            for entry in &self.unprinted {
+                // `Display` for f32 writes 10.0 as "10" (a TOML integer, read back as 10.0).
+                match *entry {
+                    Unprinted::Color { rgba, delta_e } => {
+                        let [r, g, b, a] = rgba;
+                        out.push_str(&format!(
+                            "  {{ rgba = [{r}, {g}, {b}, {a}], delta_e = {delta_e} }},\n"
+                        ));
+                    }
+                    Unprinted::Material { delta_e } => {
+                        out.push_str(&format!("  {{ material = true, delta_e = {delta_e} }},\n"));
+                    }
+                }
+            }
+            out.push_str("]\n");
+        }
         for palette in &self.palette {
             out.push_str(&format!(
                 "\n[[palette]]\nsize = {}\npicks = [\n",
@@ -234,6 +355,13 @@ mod tests {
     fn sample() -> PaletteConfig {
         PaletteConfig {
             material: [20, 20, 22],
+            unprinted: vec![
+                Unprinted::Material { delta_e: 10.0 },
+                Unprinted::Color {
+                    rgba: [200, 40, 40, 255],
+                    delta_e: 12.5,
+                },
+            ],
             palette: vec![
                 SizedPalette {
                     size: 3,
@@ -268,7 +396,9 @@ mod tests {
     fn writes_the_simple_format_and_reads_it_back() {
         let text = sample().to_toml(&["Header line one.", "Two."]);
         assert!(text.starts_with(
-            "# Header line one.\n# Two.\n\nmaterial = [20, 20, 22]\n\n[[palette]]\nsize = 3\n"
+            "# Header line one.\n# Two.\n\nmaterial = [20, 20, 22]\nunprinted = [\n\
+             \x20 { material = true, delta_e = 10 },\n\
+             \x20 { rgba = [200, 40, 40, 255], delta_e = 12.5 },\n]\n\n[[palette]]\nsize = 3\n"
         ));
         assert!(text.contains("  { rgba = [210, 120, 40, 255], ink = \"Pantone 1595\" },\n"));
         assert_eq!(PaletteConfig::parse(&text).unwrap(), sample());
@@ -353,7 +483,7 @@ mod tests {
         let text = config.to_toml(&[]);
         assert_eq!(
             text,
-            "\nmaterial = [255, 255, 255]\n\n[[palette]]\nsize = 3\npicks = [\n]\n"
+            "\nmaterial = [255, 255, 255]\nunprinted = []\n\n[[palette]]\nsize = 3\npicks = [\n]\n"
         );
         assert_eq!(PaletteConfig::parse(&text).unwrap(), config);
     }
@@ -410,5 +540,84 @@ mod tests {
             Err(ConfigError::UnknownInk("Nope".into()))
         );
         assert_eq!(sample().size(16), Err(ConfigError::MissingSize(16)));
+    }
+
+    #[test]
+    fn unprinted_colors_are_read_and_turned_into_ranges() {
+        // Absent: none.
+        let none = PaletteConfig::parse("[[palette]]\nsize = 1\npicks = []\n").unwrap();
+        assert!(none.unprinted.is_empty());
+        // Both kinds; an integer delta_e reads as a float.
+        let text = "material = [0, 0, 0]\nunprinted = [\n\
+                    { material = true, delta_e = 10 },\n\
+                    { rgba = [9, 9, 9, 0], delta_e = 2.5 },\n]\n\n\
+                    [[palette]]\nsize = 1\npicks = []\n";
+        let config = PaletteConfig::parse(text).unwrap();
+        assert_eq!(
+            config.unprinted,
+            [
+                Unprinted::Material { delta_e: 10.0 },
+                Unprinted::Color {
+                    rgba: [9, 9, 9, 0],
+                    delta_e: 2.5
+                }
+            ]
+        );
+        // The material's entry is the given material (the config's, or a CLI override), opaque.
+        let blue = Rgb8::new(20, 140, 230);
+        assert_eq!(
+            config.ranges(blue),
+            [
+                MaterialRange {
+                    pixel: Rgba8::new(20, 140, 230, 255),
+                    delta_e: 10.0
+                },
+                MaterialRange {
+                    pixel: Rgba8::new(9, 9, 9, 0),
+                    delta_e: 2.5
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_unprinted_colors() {
+        let with = |entries: &str| {
+            PaletteConfig::parse(&format!(
+                "unprinted = [{entries}]\n\n[[palette]]\nsize = 1\npicks = []\n"
+            ))
+        };
+        for shape in [
+            "{ delta_e = 1 }",
+            "{ rgba = [1, 2, 3, 4], material = true, delta_e = 1 }",
+            "{ material = false, delta_e = 1 }",
+            "{ rgba = [1, 2, 3], delta_e = 1 }",
+            "{ material = true }",
+            "{ material = true, delta_e = 1, extra = 1 }",
+        ] {
+            assert!(
+                matches!(with(shape), Err(ConfigError::Syntax(_))),
+                "{shape}"
+            );
+        }
+        assert_eq!(
+            with("{ material = true, delta_e = 100.5 }"),
+            Err(ConfigError::UnprintedDeltaE(100.5))
+        );
+        assert!(matches!(
+            with("{ material = true, delta_e = nan }"),
+            Err(ConfigError::UnprintedDeltaE(_))
+        ));
+        assert_eq!(
+            with("{ material = true, delta_e = 1 }, { material = true, delta_e = 2 }"),
+            Err(ConfigError::DuplicateMaterialUnprinted)
+        );
+        let many = vec!["{ rgba = [1, 2, 3, 4], delta_e = 1 }"; MAX_UNPRINTED + 1].join(", ");
+        assert_eq!(
+            with(&many),
+            Err(ConfigError::TooManyUnprinted {
+                count: MAX_UNPRINTED + 1
+            })
+        );
     }
 }

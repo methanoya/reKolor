@@ -492,6 +492,13 @@ describe('reKolor app', () => {
   }
 
   const BANDS = [-18, -6, 6, 18];
+  /** The Original's and the preview's frames. */
+  const frames = (screen: { container: HTMLElement }) => [
+    ...screen.container.querySelectorAll<HTMLElement>('.views .frame'),
+  ];
+  /** The "Not printed" rows' labels, in order. */
+  const rangeRows = (screen: { container: HTMLElement }) =>
+    [...screen.container.querySelectorAll('.range-color')].map((e) => e.textContent!.trim());
   const materialInput = (screen: { container: HTMLElement }) =>
     screen.container.querySelector<HTMLInputElement>('[data-testid=material]')!;
   const originalFrame = (screen: { container: HTMLElement }) =>
@@ -511,7 +518,7 @@ describe('reKolor app', () => {
     return [...context.getImageData(x, y, 1, 1).data];
   }
 
-  test('M5, M6: the material is the Original backdrop and names the zero-pick preview', async () => {
+  test('M5, M6, U2, U6: no material at first; a chosen one is behind both images', async () => {
     const screen = await render(App);
     await expect.element(screen.getByText(/Engine ready/)).toBeVisible();
     const input = screen.container.querySelector<HTMLInputElement>('#file')!;
@@ -519,19 +526,32 @@ describe('reKolor app', () => {
     await expect
       .element(screen.getByText('No picks yet: the image as printed on white'))
       .toBeVisible();
+    // U6: "none": a checkerboard swatch and frames, both buttons available, nothing unprinted.
+    expect(screen.container.querySelector('.material-swatch.none')).not.toBeNull();
+    for (const frame of frames(screen)) {
+      expect(getComputedStyle(frame).backgroundImage).toMatch(/conic-gradient/);
+    }
     const white = screen.getByRole('button', { name: 'White' });
-    await expect.element(white).toBeDisabled();
+    const black = screen.getByRole('button', { name: 'Black' });
+    await expect.element(white).toBeEnabled();
+    await expect.element(black).toBeEnabled();
+    expect(rangeRows(screen)).toEqual([]);
 
     await userEvent.fill(screen.getByTestId('material'), '#102030');
     await expect
       .element(screen.getByText('No picks yet: the image as printed on the material (#102030)'))
       .toBeVisible();
-    // C5 a: the frame's background, not drawn into the image canvas; no checkerboard.
-    const frame = getComputedStyle(originalFrame(screen));
-    expect(frame.backgroundColor).toBe('rgb(16, 32, 48)');
-    expect(frame.backgroundImage).toBe('none');
-    // The transparent band of the zero-pick preview shows the material too (I8 c).
-    expect(await downloadedPixel(screen, 30, 16)).toEqual([16, 32, 48, 255]);
+    // C5 a, U2: both frames' background, not drawn into the image canvas; no checkerboard.
+    for (const frame of frames(screen)) {
+      expect(getComputedStyle(frame).backgroundColor).toBe('rgb(16, 32, 48)');
+      expect(getComputedStyle(frame).backgroundImage).toBe('none');
+    }
+    expect(screen.container.querySelector('.material-swatch.none')).toBeNull();
+    // U7, U8: the material's own color is left unprinted, so the transparent band (the material)
+    // is transparent in the result; the opaque red band is printed.
+    expect(rangeRows(screen)).toEqual(['Material color · #102030']);
+    expect(await downloadedPixel(screen, 30, 16)).toEqual([0, 0, 0, 0]);
+    expect((await downloadedPixel(screen, 6, 16))[3]).toBe(255);
 
     await white.click();
     await expect
@@ -540,7 +560,9 @@ describe('reKolor app', () => {
     expect(materialInput(screen).value).toBe('#ffffff');
     expect(getComputedStyle(originalFrame(screen)).backgroundColor).toBe('rgb(255, 255, 255)');
     await expect.element(white).toBeDisabled();
-    expect(await downloadedPixel(screen, 30, 16)).toEqual([255, 255, 255, 255]);
+    await expect.element(black).toBeEnabled();
+    expect(rangeRows(screen)).toEqual(['Material color · #ffffff']);
+    expect(await downloadedPixel(screen, 30, 16)).toEqual([0, 0, 0, 0]);
   });
 
   test('M3 a, M3.1 b: a material change re-suggests only the picks whose color changed', async () => {
@@ -564,8 +586,12 @@ describe('reKolor app', () => {
     expect(after[3]).toBe(before[3]); // opaque black: unchanged
     // M3.1 b: the transparent and the black pick now share (0, 0, 0); both stay.
     expect(colors()).toHaveLength(4);
-    await expect.element(screen.getByText('Printed with 4 inks')).toBeVisible();
-    // The transparent band prints with the ink nearest the material.
+    await expect.element(screen.getByText(/^Printed with 4 inks/)).toBeVisible();
+    // U7, U8: the transparent band is the material, which is left unprinted.
+    expect(await downloadedPixel(screen, 30, 16)).toEqual([0, 0, 0, 0]);
+    // Without that entry it prints with the ink nearest the material.
+    await screen.getByRole('button', { name: /^Print .* again$/ }).click();
+    await expect.poll(() => rangeRows(screen)).toEqual([]);
     expect(await downloadedPixel(screen, 30, 16)).toEqual([0, 0, 0, 255]);
 
     // Back to white: nothing was removed, the hand ink is still there.
@@ -710,5 +736,201 @@ describe('reKolor app', () => {
       '.pick .swatch:not(.checker):not(.ink)',
     )!.title;
     expect(title).toBe('On the material: #000000');
+  });
+
+  // ── Colors left unprinted (`.agents/material-color`, U1–U8) ────────────────────────────────
+
+  test('U7: a chosen material adds one "Not printed" entry that follows it and keeps its ΔE', async () => {
+    const { screen } = await opened(await materialFile(), []);
+    const slider = () => screen.container.querySelector<HTMLInputElement>('.range-delta input')!;
+    await screen.getByRole('button', { name: 'Black' }).click();
+    await expect.poll(() => rangeRows(screen)).toEqual(['Material color · #000000']);
+    expect(slider().value).toBe('10');
+    // A hand-set ΔE is kept when the material changes; still one entry.
+    slider().value = '25';
+    slider().dispatchEvent(new Event('input', { bubbles: true }));
+    await userEvent.fill(screen.getByTestId('material'), '#102030');
+    await expect.poll(() => rangeRows(screen)).toEqual(['Material color · #102030']);
+    expect(slider().value).toBe('25');
+    // Removed, then the next choice adds it again with the default ΔE.
+    await screen.getByRole('button', { name: /^Print .* again$/ }).click();
+    await expect.poll(() => rangeRows(screen)).toEqual([]);
+    await screen.getByRole('button', { name: 'Black' }).click();
+    await expect.poll(() => rangeRows(screen)).toEqual(['Material color · #000000']);
+    expect(slider().value).toBe('10');
+  });
+
+  test('U1, U3, U8: + then a click leaves a color unprinted, marked with a square', async () => {
+    const { screen, at, status } = await opened(await materialFile(), [-18]); // a pick: a circle
+    const overlay = screen.container.querySelector<HTMLCanvasElement>(
+      `${ORIGINAL} ~ canvas.overlay`,
+    )!;
+    const rects = vi.spyOn(CanvasRenderingContext2D.prototype, 'rect');
+    const arcs = vi.spyOn(CanvasRenderingContext2D.prototype, 'arc');
+    const add = screen.getByRole('button', { name: 'Leave a color unprinted' });
+    await add.click();
+    await expect.element(add).toHaveAttribute('aria-pressed', 'true');
+    await expect
+      .element(
+        screen.getByText('Original — click a color to leave it unprinted (the material shows)'),
+      )
+      .toBeVisible();
+    await userEvent.click(page.elementLocator(overlay.previousElementSibling!), {
+      position: at(-15), // column 9: the opaque red band
+    });
+    await expect.element(status).toMatchTextContent('Left to the material: (200, 40, 40)');
+    await expect.element(add).toHaveAttribute('aria-pressed', 'false');
+    expect(rangeRows(screen)).toEqual(['rgb 200, 40, 40']);
+    await expect.element(screen.getByText(/· 1 color left to the material/)).toBeVisible();
+    // U3: a square at the clicked pixel (11 px, centered); the pick keeps its circle.
+    const square = rects.mock.calls.find(
+      ([x, y, w]) =>
+        w === 11 && Math.abs(x + 5.5 - at(-15).x) <= 1 && Math.abs(y + 5.5 - at(-15).y) <= 1,
+    );
+    expect(square, JSON.stringify(rects.mock.calls.slice(-3))).toBeDefined();
+    expect(arcs.mock.calls.some(([x]) => Math.abs(x - at(-18).x) <= 1)).toBe(true);
+    // U8: transparent in the result; × prints it again.
+    expect(await downloadedPixel(screen, 6, 16)).toEqual([0, 0, 0, 0]);
+    await screen.getByRole('button', { name: 'Print rgb 200, 40, 40 again' }).click();
+    await expect.poll(() => rangeRows(screen)).toEqual([]);
+    expect((await downloadedPixel(screen, 6, 16))[3]).toBe(255);
+  });
+
+  test('K7: a new image keeps the material entry and clears the clicked ones', async () => {
+    const { screen, at, status } = await opened(await materialFile(), []);
+    await screen.getByRole('button', { name: 'Black' }).click();
+    await expect.poll(() => rangeRows(screen)).toHaveLength(1);
+    await screen.getByRole('button', { name: 'Leave a color unprinted' }).click();
+    await userEvent.click(page.elementLocator(screen.container.querySelector(ORIGINAL)!), {
+      position: at(-15),
+    });
+    await expect.element(status).toMatchTextContent('Left to the material');
+    expect(rangeRows(screen)).toEqual(['Material color · #000000', 'rgb 200, 40, 40']);
+    const input = screen.container.querySelector<HTMLInputElement>('#file')!;
+    await userEvent.upload(page.elementLocator(input), await materialFile());
+    await expect.element(status).toHaveTextContent('Click a color in the original to pick it.');
+    expect(rangeRows(screen)).toEqual(['Material color · #000000']);
+  });
+
+  test('K8, K9: unprinted colors go out with an export and come back with an import', async () => {
+    const { screen, status } = await opened(await materialFile(), []);
+    const configInput = screen.container.querySelector<HTMLInputElement>('input[accept^=".toml"]')!;
+    const entries =
+      'unprinted = [\n' +
+      '  { material = true, delta_e = 25 },\n' +
+      '  { rgba = [200, 40, 40, 255], delta_e = 10 },\n]\n';
+    const config = (unprinted: string) =>
+      'material = [255, 255, 255]\n' +
+      unprinted +
+      '\n[[palette]]\nsize = 1\npicks = [\n' +
+      '  { rgba = [0, 0, 0, 255], ink = "Pure Black (non-palette)" },\n]\n';
+    expect(screen.container.querySelector('.material-swatch.none')).not.toBeNull();
+    await userEvent.upload(
+      page.elementLocator(configInput),
+      new File([config(entries)], 'two.palettes.toml'),
+    );
+    await expect
+      .element(status)
+      .toHaveTextContent(
+        'Imported 1 pick (size 1) from two.palettes.toml, 2 colors left unprinted.',
+      );
+    // K6: white, but the file lists the material's own color, so the material counts as chosen.
+    expect(screen.container.querySelector('.material-swatch.none')).toBeNull();
+    expect(rangeRows(screen)).toEqual(['Material color · #ffffff', 'rgb 200, 40, 40']);
+    const sliders = () =>
+      [...screen.container.querySelectorAll<HTMLInputElement>('.range-delta input')].map(
+        (e) => e.value,
+      );
+    expect(sliders()).toEqual(['25', '10']);
+    // Both are transparent in the result: the transparent band (the material) and the red band.
+    expect(await downloadedPixel(screen, 30, 16)).toEqual([0, 0, 0, 0]);
+    expect(await downloadedPixel(screen, 6, 16)).toEqual([0, 0, 0, 0]);
+
+    // Exported as they are.
+    const download = captureDownload();
+    await screen.getByRole('button', { name: 'Export picks' }).click();
+    expect(await (await download).blob.text()).toContain(
+      `\nmaterial = [255, 255, 255]\n${entries}`,
+    );
+
+    // A file without unprinted colors leaves none (the file is the whole state).
+    await userEvent.upload(
+      page.elementLocator(configInput),
+      new File([config('')], 'none.palettes.toml'),
+    );
+    await expect
+      .element(status)
+      .toHaveTextContent('Imported 1 pick (size 1) from none.palettes.toml.');
+    expect(rangeRows(screen)).toEqual([]);
+    // GPT review 2: white with no material entry is "none" again: swatch and both frames.
+    expect(screen.container.querySelector('.material-swatch.none')).not.toBeNull();
+    for (const frame of frames(screen)) {
+      expect(getComputedStyle(frame).backgroundImage).toMatch(/conic-gradient/);
+    }
+  });
+
+  test('GPT review 3: removing an entry during a material change keeps it removed', async () => {
+    const { screen, status } = await opened(await materialFile(), [-18]); // a pick: a re-match
+    await screen.getByRole('button', { name: 'Black' }).click();
+    await expect.poll(() => rangeRows(screen)).toEqual(['Material color · #000000']);
+    // Hold the next re-match, so the material change below waits in the queue.
+    const send = Worker.prototype.postMessage;
+    const held: (() => void)[] = [];
+    vi.spyOn(Worker.prototype, 'postMessage').mockImplementation(function (
+      this: Worker,
+      ...args: Parameters<Worker['postMessage']>
+    ) {
+      const call = () => send.apply(this, args);
+      if ((args[0] as { path?: string[] } | null)?.path?.[0] === 'rematch' && held.length === 0) {
+        held.push(call);
+      } else {
+        call();
+      }
+    });
+    const input = materialInput(screen);
+    input.value = '#102030';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await expect.poll(() => held.length).toBe(1);
+    // The later action: remove the material's entry while the change still waits.
+    await screen.getByRole('button', { name: /^Print .* again$/ }).click();
+    held[0]!();
+    await expect.element(status).toMatchTextContent('Material #102030');
+    await expect.poll(() => rangeRows(screen)).toEqual([]);
+  });
+
+  test('GPT review 4: an imported ΔE above 40 stays as it is and can be edited', async () => {
+    const { screen, status } = await opened(await materialFile(), []);
+    const configInput = screen.container.querySelector<HTMLInputElement>('input[accept^=".toml"]')!;
+    const config =
+      'material = [0, 0, 0]\nunprinted = [\n' +
+      '  { rgba = [200, 40, 40, 255], delta_e = 75 },\n' +
+      '  { rgba = [0, 0, 0, 255], delta_e = 30 },\n]\n\n' +
+      '[[palette]]\nsize = 1\npicks = [\n' +
+      '  { rgba = [0, 0, 0, 255], ink = "Pure Black (non-palette)" },\n]\n';
+    await userEvent.upload(
+      page.elementLocator(configInput),
+      new File([config], 'wide.palettes.toml'),
+    );
+    await expect.element(status).toMatchTextContent('2 colors left unprinted');
+    const sliders = () => [
+      ...screen.container.querySelectorAll<HTMLInputElement>('.range-delta input'),
+    ];
+    const outputs = () =>
+      [...screen.container.querySelectorAll('.range-delta output')].map((e) => e.textContent);
+    // The value above 40 is kept, and the slider and the number agree; the other keeps 0–40.
+    expect(sliders().map((e) => [e.value, e.max])).toEqual([
+      ['75', '100'],
+      ['30', '40'],
+    ]);
+    expect(outputs()).toEqual(['75', '30']);
+    // Edited, then exported as edited.
+    sliders()[0]!.value = '60';
+    sliders()[0]!.dispatchEvent(new Event('input', { bubbles: true }));
+    await expect.poll(outputs).toEqual(['60', '30']);
+    const download = captureDownload();
+    await screen.getByRole('button', { name: 'Export picks' }).click();
+    const text = await (await download).blob.text();
+    expect(text).toContain('{ rgba = [200, 40, 40, 255], delta_e = 60 }');
+    expect(text).toContain('{ rgba = [0, 0, 0, 255], delta_e = 30 }');
   });
 });

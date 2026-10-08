@@ -79,11 +79,11 @@ impl SourceImage {
     /// straight into an `ImageData`, pass `new Uint8Array(imageData.data.buffer)`.
     ///
     /// Each pixel is composited over `request.material` and takes the nearest ink (an exact source
-    /// match takes its own ink; ties go to the earlier mapping); the output is opaque. With **no
-    /// mappings** the output is the composited copy (the image as it looks on the material); with
-    /// **one mapping** every pixel takes that ink. ΔE is bit-identical to a native build, so ties
-    /// resolve the same way. Pixels within a `materialRanges` entry show the material instead
-    /// (prototype; checked first).
+    /// match takes its own ink; ties go to the earlier mapping), fully opaque. With **no mappings**
+    /// the output is the composited copy (the image as it looks on the material); with **one
+    /// mapping** every pixel takes that ink. ΔE is bit-identical to a native build, so ties
+    /// resolve the same way. A pixel within a `materialRanges` entry (checked first) takes no ink
+    /// and is **transparent** (`0, 0, 0, 0`), so the material shows through.
     /// At most 256 mappings (the palette-config limit), since the work grows with each one; the
     /// same for ranges.
     pub fn recolor(&self, request: Ts<RecolorRequest>, out: &mut [u8]) -> RecolorOutcome {

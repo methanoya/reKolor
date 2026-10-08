@@ -25,10 +25,24 @@ pub struct ConfigSection {
     pub picks: Vec<ConfigPick>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+/// A color left unprinted, as in a config (material-color K8): a stored pixel color, or the
+/// material's own color (whatever the material is).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Tsify)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ConfigUnprinted {
+    #[serde(rename_all = "camelCase")]
+    Color { rgba: Rgba, delta_e: f32 },
+    #[serde(rename_all = "camelCase")]
+    Material { delta_e: f32 },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Tsify)]
 pub struct ParsedConfig {
     /// The material color, for every section; white when the file has no `material` line.
     pub material: Rgb,
+    /// Colors left unprinted, for every section, in file order; none when the file has no
+    /// `unprinted` line.
+    pub unprinted: Vec<ConfigUnprinted>,
     /// In file order.
     pub sections: Vec<ConfigSection>,
 }
@@ -52,13 +66,17 @@ pub struct ResolvedPicks {
 }
 
 /// What to export: the current picks, in order.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Tsify)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigExport {
     /// The image's file name, mentioned in the header.
     pub image_name: String,
     /// The material the picks were made on; always written.
     pub material: Rgb,
+    /// Colors left unprinted, in order; always written (none if absent).
+    #[tsify(optional)]
+    #[serde(default)]
+    pub unprinted: Vec<ConfigUnprinted>,
     pub picks: Vec<ConfigPick>,
 }
 
@@ -95,6 +113,30 @@ impl From<&config::ConfigPick> for ConfigPick {
     }
 }
 
+impl From<&config::Unprinted> for ConfigUnprinted {
+    fn from(u: &config::Unprinted) -> Self {
+        match *u {
+            config::Unprinted::Color { rgba, delta_e } => ConfigUnprinted::Color {
+                rgba: core::Rgba8::from(rgba).into(),
+                delta_e,
+            },
+            config::Unprinted::Material { delta_e } => ConfigUnprinted::Material { delta_e },
+        }
+    }
+}
+
+impl From<ConfigUnprinted> for config::Unprinted {
+    fn from(u: ConfigUnprinted) -> Self {
+        match u {
+            ConfigUnprinted::Color { rgba, delta_e } => config::Unprinted::Color {
+                rgba: [rgba.r, rgba.g, rgba.b, rgba.a],
+                delta_e,
+            },
+            ConfigUnprinted::Material { delta_e } => config::Unprinted::Material { delta_e },
+        }
+    }
+}
+
 impl From<ConfigPick> for config::ConfigPick {
     fn from(p: ConfigPick) -> Self {
         let Rgba { r, g, b, a } = p.rgba;
@@ -112,6 +154,7 @@ pub fn parse_config(text: &str) -> ParsedConfigOutcome {
     let outcome = config::PaletteConfig::parse(text)
         .map(|c| ParsedConfig {
             material: core::Rgb8::from(c.material).into(),
+            unprinted: c.unprinted.iter().map(Into::into).collect(),
             sections: c
                 .palette
                 .iter()
@@ -136,6 +179,7 @@ pub fn serialize_config(request: Ts<ConfigExport>) -> ConfigTextOutcome {
             let Rgb { r, g, b } = request.material;
             let config = config::PaletteConfig {
                 material: [r, g, b],
+                unprinted: request.unprinted.into_iter().map(Into::into).collect(),
                 palette: vec![config::SizedPalette {
                     size,
                     picks: request.picks.into_iter().map(Into::into).collect(),

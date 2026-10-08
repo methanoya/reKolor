@@ -1,6 +1,7 @@
 <script lang="ts">
-  import type { ConfigSection, Rgb, Rgba } from 'rekolor-wasm';
+  import type { ConfigSection, ConfigUnprinted, Rgb, Rgba } from 'rekolor-wasm';
   import { onDestroy } from 'svelte';
+  import { SvelteMap } from 'svelte/reactivity';
   import ImageView from './components/ImageView.svelte';
   import PickList from './components/PickList.svelte';
   import { EngineClient } from './lib/client';
@@ -86,7 +87,7 @@
    * no input came after it, so the input never jumps back from a newer choice.
    */
   let materialInputs = 0;
-  /** Colors left to the material (prototype): pixels within ΔE of them are not printed. */
+  /** Colors left unprinted (U1): pixels within ΔE of them take no ink; the material shows. */
   let ranges = $state<RangeEntry[]>([]);
   let nextRangeId = 1;
   /** The next click on the original adds a material range instead of a pick. */
@@ -99,6 +100,8 @@
   let materialChosen = $state(false);
   /** The ΔE a new material range starts with. */
   const RANGE_DELTA_E = 10;
+  /** The ΔE slider's usual maximum; files may hold up to 100 (K10). */
+  const RANGE_SLIDER_MAX = 40;
 
   let view = $state<View>({ scale: 1, x: 0, y: 0 });
   let viewport: Size = { width: 0, height: 0 };
@@ -327,7 +330,7 @@
       }
       material = next;
     }
-    // Choosing a material (even the one in use) leaves its own color unprinted (prototype).
+    // Choosing a material (even the one in use) leaves its own color unprinted (U7).
     materialChosen = true;
     setMaterialRange(next);
     status = `Material ${hex(next)}${resuggested ? ` · ${resuggested} pick${resuggested === 1 ? '' : 's'} re-suggested` : ''}.`;
@@ -336,14 +339,23 @@
   }
 
   /**
-   * The material's own color as a range with the default ΔE (prototype): added if missing (also
+   * The material's own color as a range with the default ΔE (U7): added if missing (also
    * after being removed), otherwise moved to the new color with its ΔE kept.
    */
   function setMaterialRange(color: Rgb) {
     const pixel = { ...color, a: 255 };
     ranges = ranges.some((r) => r.material)
       ? ranges.map((r) => (r.material ? { ...r, pixel } : r))
-      : [{ id: nextRangeId++, pixel, deltaE: RANGE_DELTA_E, material: true }, ...ranges];
+      : [
+          {
+            id: nextRangeId++,
+            pixel,
+            deltaE: RANGE_DELTA_E,
+            maxDeltaE: RANGE_SLIDER_MAX,
+            material: true,
+          },
+          ...ranges,
+        ];
   }
 
   /**
@@ -371,10 +383,10 @@
     });
   }
 
-  // ── Material ranges (prototype): colors left unprinted, the material shows instead ─────────────
+  // ── Colors left unprinted (U1–U8): no ink there, the material shows instead ───────────────────
   // A range is a pixel from the original and a ΔE: every pixel whose color (composited over the
-  // material, in Rust) is within that ΔE of the range's pixel shows the material and takes no ink.
-  // Ranges are checked before the picks.
+  // material, in Rust) is within that ΔE of the range's pixel takes no ink and is transparent in
+  // the result, so the material shows through (U8). Ranges are checked before the picks (K1).
 
   /** Adds a material range at the clicked pixel (queued like a pick: it reads the material). */
   function addRange(x: number, y: number, seen: Rgba | undefined) {
@@ -389,20 +401,43 @@
         return;
       }
       const { pixel } = picked.value;
-      ranges = [...ranges, { id: nextRangeId++, pixel, deltaE: RANGE_DELTA_E, at: { x, y } }];
+      ranges = [
+        ...ranges,
+        {
+          id: nextRangeId++,
+          pixel,
+          deltaE: RANGE_DELTA_E,
+          maxDeltaE: RANGE_SLIDER_MAX,
+          at: { x, y },
+        },
+      ];
       status = `Left to the material: (${pixel.r}, ${pixel.g}, ${pixel.b}) and colors within ΔE ${RANGE_DELTA_E}.`;
       requestRecolor();
     });
   }
 
+  // Entry changes are queued like pick changes, so they keep their place among material changes
+  // and imports (GPT review 3). A slider drag is one change per burst: one coalescer per entry.
+  const deltaQueues = new SvelteMap<number, (deltaE: number) => void>();
+
   function setRangeDeltaE(id: number, deltaE: number) {
-    ranges = ranges.map((r) => (r.id === id ? { ...r, deltaE } : r));
-    requestRecolor();
+    let push = deltaQueues.get(id);
+    if (!push) {
+      push = mutations.coalescing<number>((value) => {
+        ranges = ranges.map((r) => (r.id === id ? { ...r, deltaE: value } : r));
+        requestRecolor();
+      });
+      deltaQueues.set(id, push);
+    }
+    push(deltaE);
   }
 
   function removeRange(id: number) {
-    ranges = ranges.filter((r) => r.id !== id);
-    requestRecolor();
+    void mutations.run(() => {
+      ranges = ranges.filter((r) => r.id !== id);
+      deltaQueues.delete(id);
+      requestRecolor();
+    });
   }
 
   /** Queues a synchronous pick-list change behind any pending one. */
@@ -437,7 +472,12 @@
   let sizeDialog: HTMLDialogElement;
   let configSections = $state<ConfigSection[]>([]);
   let configName = $state('');
-  let configMaterial: Rgb = WHITE;
+  /** A config's material and unprinted colors (for every section), while its dialog is open. */
+  interface ConfigLook {
+    material: Rgb;
+    unprinted: ConfigUnprinted[];
+  }
+  let configLook: ConfigLook = { material: WHITE, unprinted: [] };
 
   function onconfigchosen(e: Event & { currentTarget: HTMLInputElement }) {
     const f = e.currentTarget.files?.[0];
@@ -457,16 +497,22 @@
         error = `${f.name}: ${parsed.error.message}`;
         return;
       }
-      const { sections, material: fileMaterial } = parsed.value;
+      const { sections, material: fileMaterial, unprinted } = parsed.value;
       if (sections.length === 0) {
         error = `${f.name}: the config has no palettes.`;
       } else if (sections.length === 1) {
-        await applySection(sections[0]!, fileMaterial, f.name, gen, inputs);
+        await applySection(
+          sections[0]!,
+          { material: fileMaterial, unprinted },
+          f.name,
+          gen,
+          inputs,
+        );
       } else {
         // The choice in the dialog is the next action; it queues the import then.
         configSections = sections;
         configName = f.name;
-        configMaterial = fileMaterial;
+        configLook = { material: fileMaterial, unprinted };
         sizeDialog.showModal();
       }
     });
@@ -478,19 +524,20 @@
     // Svelte state is a proxy, which can't be posted to the worker: keep a plain copy.
     const plain = $state.snapshot(section);
     const name = configName;
-    const fileMaterial = configMaterial;
+    const look = configLook;
     const inputs = materialInputs;
-    void mutations.run(() => applySection(plain, fileMaterial, name, gen, inputs));
+    void mutations.run(() => applySection(plain, look, name, gen, inputs));
   }
 
   /**
-   * Resolves a section on the config's material and replaces the picks and the material in one
-   * step (runs inside `mutations`). Duplicates in the file are kept, as written (C4 a). `inputs`:
-   * the material inputs made before the import was chosen.
+   * Resolves a section on the config's material and replaces the picks, the material and the
+   * unprinted colors in one step (runs inside `mutations`): the file is the whole state (K9).
+   * Duplicates in the file are kept, as written (C4 a). `inputs`: the material inputs made before
+   * the import was chosen.
    */
   async function applySection(
     section: ConfigSection,
-    fileMaterial: Rgb,
+    { material: fileMaterial, unprinted }: ConfigLook,
     name: string,
     gen: number,
     inputs: number,
@@ -511,11 +558,29 @@
     }));
     const materialChanged = !sameRgb(fileMaterial, material);
     material = fileMaterial;
-    if (!sameRgb(fileMaterial, WHITE)) materialChosen = true;
-    if (ranges.some((r) => r.material)) setMaterialRange(fileMaterial);
+    // Imported entries have no square: like imported picks, they weren't clicked.
+    // A value above the slider's usual range widens that entry's slider (R2 a, GPT review 4).
+    const maxDeltaE = (deltaE: number) => (deltaE > RANGE_SLIDER_MAX ? 100 : RANGE_SLIDER_MAX);
+    ranges = unprinted.map((u) =>
+      u.kind === 'material'
+        ? {
+            id: nextRangeId++,
+            pixel: { ...fileMaterial, a: 255 },
+            deltaE: u.deltaE,
+            maxDeltaE: maxDeltaE(u.deltaE),
+            material: true,
+          }
+        : { id: nextRangeId++, pixel: u.rgba, deltaE: u.deltaE, maxDeltaE: maxDeltaE(u.deltaE) },
+    );
+    // K6, K9: the file decides, "none" included; a white material can't tell a choice from the
+    // default unless its own color is listed (GPT review 2).
+    materialChosen = !sameRgb(fileMaterial, WHITE) || unprinted.some((u) => u.kind === 'material');
     // A material chosen after the import is queued behind it and already shown.
     if (inputs === materialInputs) materialInput = hex(fileMaterial);
-    status = `Imported ${picks.length} pick${picks.length === 1 ? '' : 's'} (size ${section.size}) from ${name}${materialChanged ? `, on material ${hex(fileMaterial)}` : ''}.`;
+    const left = unprinted.length
+      ? `, ${unprinted.length} color${unprinted.length === 1 ? '' : 's'} left unprinted`
+      : '';
+    status = `Imported ${picks.length} pick${picks.length === 1 ? '' : 's'} (size ${section.size}) from ${name}${materialChanged ? `, on material ${hex(fileMaterial)}` : ''}${left}.`;
     requestRecolor();
     if (materialChanged) void countColors();
   }
@@ -529,6 +594,11 @@
         name,
         on,
         picks.map((p) => ({ rgba: $state.snapshot(p.pixel), ink: p.ink.name })),
+        ranges.map((r): ConfigUnprinted =>
+          r.material
+            ? { kind: 'material', deltaE: r.deltaE }
+            : { kind: 'color', rgba: $state.snapshot(r.pixel), deltaE: r.deltaE },
+        ),
       ),
     );
     if (exported.status === 'error') {
@@ -898,7 +968,7 @@
                 <input
                   type="range"
                   min="0"
-                  max="40"
+                  max={range.maxDeltaE}
                   step="1"
                   value={range.deltaE}
                   oninput={(e) => setRangeDeltaE(range.id, Number(e.currentTarget.value))}

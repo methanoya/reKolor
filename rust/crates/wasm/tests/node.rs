@@ -12,10 +12,10 @@ mod generator;
 
 use rekolor_core::Rgb8;
 use rekolor_wasm::{
-    ColorCount, ConfigExport, ConfigPick, ConfigSection, ConfigText, ErrorKind, ImageStats,
-    Mapping, Outcome, Palette, PaletteData, PaletteEntry, PaletteMatch, PaletteMatches,
-    ParsedConfig, Pick, RecolorRequest, RecolorStats, ResolvedPicks, Rgb, Rgba, SourceImage,
-    composite, parse_config, serialize_config,
+    ColorCount, ConfigExport, ConfigPick, ConfigSection, ConfigText, ConfigUnprinted, ErrorKind,
+    ImageStats, Mapping, MaterialRange, Outcome, Palette, PaletteData, PaletteEntry, PaletteMatch,
+    PaletteMatches, ParsedConfig, Pick, RecolorRequest, RecolorStats, ResolvedPicks, Rgb, Rgba,
+    SourceImage, composite, parse_config, serialize_config,
 };
 use serde::de::DeserializeOwned;
 use tsify::{Ts, Tsify};
@@ -575,6 +575,7 @@ fn sample_configs_parse_resolve_and_round_trip() {
             }
             // Export (one section, size = number of picks) and read it back.
             let export = ConfigExport {
+                unprinted: vec![],
                 image_name: "x.png".into(),
                 material: parsed.material,
                 picks: section.picks.clone(),
@@ -786,6 +787,7 @@ fn configs_carry_the_material() {
     // Always written (M4 b), white too.
     for c in [rgb([0, 0, 0]), WHITE] {
         let export = ConfigExport {
+            unprinted: vec![],
             image_name: "x.png".into(),
             material: c,
             picks: parsed.sections[0].picks.clone(),
@@ -797,6 +799,99 @@ fn configs_carry_the_material() {
 
     assert_eq!(
         error_kind::<ParsedConfig>(read(parse_config("material = [1, 2]\n"))),
+        ErrorKind::InvalidConfig
+    );
+}
+
+#[wasm_bindgen_test]
+fn material_ranges_leave_pixels_transparent_and_are_checked() {
+    // Transparent (hiding 9,9,9), opaque red, opaque black; on black with the material's own range.
+    let image =
+        SourceImage::from_rgba(vec![9, 9, 9, 0, 230, 76, 60, 255, 0, 0, 0, 255], 3, 1).unwrap();
+    let request = |ranges: Vec<MaterialRange>| {
+        Ts::from_rust(&RecolorRequest {
+            mappings: vec![],
+            material: rgb([0, 0, 0]),
+            material_ranges: ranges,
+        })
+        .unwrap()
+    };
+    let black = |delta_e| MaterialRange {
+        pixel: Rgba {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 255,
+        },
+        delta_e,
+    };
+    let mut out = [0u8; 12];
+    let _: RecolorStats = ok(read(image.recolor(request(vec![black(10.0)]), &mut out)));
+    assert_eq!(out, [0, 0, 0, 0, 230, 76, 60, 255, 0, 0, 0, 0]);
+
+    for bad in [-1.0, 100.5, f32::NAN] {
+        assert_eq!(
+            error_kind::<RecolorStats>(read(image.recolor(request(vec![black(bad)]), &mut out))),
+            ErrorKind::InvalidInput,
+            "deltaE {bad}"
+        );
+    }
+    assert_eq!(
+        error_kind::<RecolorStats>(read(
+            image.recolor(request(vec![black(1.0); 257]), &mut out)
+        )),
+        ErrorKind::TooManyMappings
+    );
+}
+
+#[wasm_bindgen_test]
+fn configs_carry_the_unprinted_colors() {
+    // Absent: none.
+    let parsed: ParsedConfig = ok(read(parse_config("[[palette]]\nsize = 1\npicks = []\n")));
+    assert!(parsed.unprinted.is_empty());
+
+    let text = "material = [0, 0, 0]\nunprinted = [\n\
+                { material = true, delta_e = 10 },\n\
+                { rgba = [200, 40, 40, 255], delta_e = 12.5 },\n]\n\n\
+                [[palette]]\nsize = 1\npicks = []\n";
+    let parsed: ParsedConfig = ok(read(parse_config(text)));
+    let expected = vec![
+        ConfigUnprinted::Material { delta_e: 10.0 },
+        ConfigUnprinted::Color {
+            rgba: Rgba {
+                r: 200,
+                g: 40,
+                b: 40,
+                a: 255,
+            },
+            delta_e: 12.5,
+        },
+    ];
+    assert_eq!(parsed.unprinted, expected);
+    // The TypeScript shape: a tagged union with camelCase fields.
+    let js = Ts::from_rust(&parsed.unprinted[1]).unwrap().js_value();
+    assert_eq!(property(&js, "kind"), "color");
+    assert_eq!(property(&js, "deltaE"), 12.5);
+
+    // Exported again, always written; out-of-range ΔE is an invalidConfig error.
+    let export = |unprinted: Vec<ConfigUnprinted>| ConfigExport {
+        image_name: "x.png".into(),
+        material: rgb([0, 0, 0]),
+        unprinted,
+        picks: vec![],
+    };
+    let out: ConfigText = ok(read(serialize_config(
+        Ts::from_rust(&export(expected.clone())).unwrap(),
+    )));
+    let again: ParsedConfig = ok(read(parse_config(&out.text)));
+    assert_eq!(again.unprinted, expected);
+    let none: ConfigText = ok(read(serialize_config(
+        Ts::from_rust(&export(vec![])).unwrap(),
+    )));
+    assert!(none.text.contains("\nunprinted = []\n"), "{}", none.text);
+    let bad = export(vec![ConfigUnprinted::Material { delta_e: 101.0 }]);
+    assert_eq!(
+        error_kind::<ConfigText>(read(serialize_config(Ts::from_rust(&bad).unwrap()))),
         ErrorKind::InvalidConfig
     );
 }
