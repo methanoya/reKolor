@@ -26,6 +26,9 @@ pub struct RecolorStats {
 /// 3. otherwise it takes the **ink** nearest to it by CIEDE2000 (on a tie, the earlier mapping);
 /// 4. **no mappings**: the output is the composited copy (the image as it looks on white);
 /// 5. **one mapping**: no special case, so every pixel takes that ink.
+///
+/// CIEDE2000 is computed in `f32` with the platform's float functions, so native and WASM builds
+/// can differ by about 1e-4 ΔE: two inks that tie exactly on one platform may not tie on the other.
 pub fn recolor(
     image: ImageRef<'_>,
     mappings: &[Mapping],
@@ -150,6 +153,7 @@ mod tests {
     fn nearest_ink_ties_go_to_the_earlier_mapping() {
         // Two different inks at exactly the same CIEDE2000 distance from gray (found by search;
         // with another ΔE implementation (R11) this pair may no longer tie, see the precondition).
+        // Native-only: in WASM the two distances differ by about 3e-4, so they don't tie there.
         let pixel = Rgb8::new(128, 128, 128);
         let a = Rgb8::new(100, 140, 117);
         let b = Rgb8::new(101, 101, 135);

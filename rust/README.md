@@ -190,5 +190,16 @@ local) kept those; changes so far:
   (what `recolor` matches), instead of the old RGB count that ignored alpha; `rgbaColors` stays. In the
   snapshot this changed the 4 fixtures with transparency (e.g. `transparent`: 256 → 1).
 
+- **I7 (documented, no change):** palette file order decides ties between entries with the same color
+  (e.g. Pantone 303 before 547). `palettes/pantone.json` stays a JSON object; every reader keeps its
+  key order (`serde_json` with `preserve_order`, `Object.entries`).
+- **I9 (documented, no change):** when a pixel is equally near to two mappings (or matches two exactly),
+  the earlier mapping wins.
+
+**Native vs WASM:** CIEDE2000 values differ slightly between native and WASM builds (about 1e-4 ΔE,
+measured), so a pixel whose two nearest inks are within about 1e-3 ΔE can get a different ink in the
+browser than in the CLI and goldens. The baseline and the WASM suite contain no such near-ties; the
+exact-tie test is native-only.
+
 Each change updates the baseline snapshot (and, if pixels move, the goldens) in the same commit, so its
 effect is a reviewed diff.

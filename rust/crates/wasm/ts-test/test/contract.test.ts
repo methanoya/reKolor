@@ -53,6 +53,8 @@ describe('Palette', () => {
     const twins = unwrap(palette.nearest({ r: 0, g: 63, b: 84 }, 2)).matches;
     expect(twins.map((m) => m.name)).toEqual(['Pantone 303', 'Pantone 547']);
     expect(twins[0]!.index).toBeLessThan(twins[1]!.index);
+    // I7: the suggestion follows the same rule.
+    expect(unwrap(palette.suggest({ r: 0, g: 63, b: 84 })).name).toBe('Pantone 303');
     palette.free();
   });
 
@@ -108,6 +110,26 @@ describe('SourceImage', () => {
 
     expect(unwrap(image.recolor(redToBlue, out))).toEqual({ exact: 1, nearest: 1 });
     expect([...out]).toEqual([58, 117, 196, 255, 58, 117, 196, 255]);
+  });
+
+  test('ties go to the earlier mapping (I9)', () => {
+    // Exact matches: one source, two inks.
+    const red = redAndTransparent();
+    const out = new Uint8Array(8);
+    const twoInks = (first: Rgb, second: Rgb): RecolorRequest => ({
+      mappings: [
+        { source: RED, ink: first },
+        { source: RED, ink: second },
+      ],
+    });
+    unwrap(red.recolor(twoInks(PANTONE_285, { r: 0, g: 0, b: 0 }), out));
+    expect([...out.slice(0, 4)]).toEqual([58, 117, 196, 255]);
+    unwrap(red.recolor(twoInks({ r: 0, g: 0, b: 0 }, PANTONE_285), out));
+    expect([...out.slice(0, 4)]).toEqual([0, 0, 0, 255]);
+
+    // Nearest-ink ties are not asserted here: native and WASM compute CIEDE2000 slightly
+    // differently (about 1e-4), so a pair of inks that ties exactly on one platform doesn't tie on
+    // the other. The exact-tie test is native-only, in `core` (`recolor` tests).
   });
 
   test('errors are values, and the module keeps working after them', () => {
