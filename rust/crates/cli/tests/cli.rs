@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use rekolor_cli::config::PaletteConfig;
+use rekolor_cli::config;
 
 fn repo_palette() -> PathBuf {
     PathBuf::from(concat!(
@@ -62,7 +62,7 @@ fn generate_configs_then_update_goldens() {
 
     for image in ["samples/edges.png", "samples/sub/gradient.png"] {
         let config_path = root.join(image.replace(".png", ".palettes.toml"));
-        let config = PaletteConfig::load(&config_path).unwrap();
+        let config = config::load(&config_path).unwrap();
         let sizes: Vec<u32> = config.palette.iter().map(|p| p.size).collect();
         assert_eq!(sizes, [3, 7, 16]);
         for sized in &config.palette {
@@ -108,7 +108,7 @@ fn generate_configs_then_update_goldens() {
             (source.width(), source.height())
         );
 
-        let config = PaletteConfig::load(&root.join(format!("{image}.palettes.toml"))).unwrap();
+        let config = config::load(&root.join(format!("{image}.palettes.toml"))).unwrap();
         let inks: HashSet<[u8; 3]> = config
             .size(size)
             .unwrap()

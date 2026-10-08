@@ -1,15 +1,16 @@
 # reKolor, Rust part
 
 A self-contained Cargo workspace (R1, R2): the color engine, its browser interface, native file
-I/O and a command-line tool. It builds and tests on its own; a web app consumes only the WASM
-package it produces.
+I/O and a command-line tool. It builds and tests on its own; the web app (`../web/`) consumes only
+the WASM package it produces.
 
 | Crate | What it is | Must not depend on |
 |---|---|---|
 | `crates/core` (`rekolor-core`) | Pure color logic on raw RGBA8 buffers: `recolor`, `analyze`, `Palette` (suggest, nearest), `pick` by coordinate, typed errors. No I/O, no printing. | wasm-bindgen, tsify, `image` |
-| `crates/wasm` (`rekolor-wasm`) | Thin browser interface over `core` (wasm-bindgen + tsify). Classes `SourceImage` and `Palette`; results as `Outcome<T>` values. | `rekolor-io` (it would pull `image` into the WASM build) |
+| `crates/config` (`rekolor-config`) | Palette config files (`*.palettes.toml`): parse, validate (sizes, distinct inks, limits), write, and resolve picks against a `Palette` (compositing in Rust). Shared by the CLI and the web app (W10 v). No file I/O. | `rekolor-io`, wasm-bindgen |
+| `crates/wasm` (`rekolor-wasm`) | Thin browser interface over `core` and `config` (wasm-bindgen + tsify). Classes `SourceImage` and `Palette`, config functions; results as `Outcome<T>` values. | `rekolor-io` (it would pull `image` into the WASM build) |
 | `crates/io` (`rekolor-io`) | Native decoding of every readable `image` format to RGBA8 (EXIF orientation applied), PNG encoding, and the decoder-discrepancy warnings (M1) as data. | — |
-| `crates/cli` (`rekolor-cli`, binary `rekolor`) | Command-line tool on top of `io` and `core`; also a small library (configs, palette loading, config generation, discovery) used by the golden test. | — |
+| `crates/cli` (`rekolor-cli`, binary `rekolor`) | Command-line tool on top of `io`, `config` and `core`; also a small library (config file names and reading, palette loading, config generation, discovery) used by the golden test. | — |
 
 Shared test data lives in `testdata/` (see [Baseline snapshot](#baseline-snapshot-r9-p1)); the golden set lives in
 `../samples/` (see [Golden set](#golden-set-x1)); the palette is `../palettes/pantone.json`.
@@ -62,6 +63,8 @@ npm test                                             # tsc --noEmit, then vitest
 | WASM | `crates/wasm/tests/node.rs` | the baseline inside WASM, the same ΔE fingerprint, Sharma data and suggestion snapshot (native = WASM, bit for bit), exact ties, malformed input → error values, lengths, factories, pick |
 | contract | `crates/wasm/ts-test/` | the generated `.d.ts` (camelCase, `Outcome` narrowing, typed arrays) and runtime behavior from TypeScript |
 | io | `crates/io/tests/io.rs` | lossless PNG round trip, 16-bit/grayscale, ICC and EXIF warnings, typed errors, all samples decode |
+| decoder fixtures | `crates/io/tests/decoders.rs` | the cross-decoder fixtures (M2) match a fresh `rekolor-io` decode |
+| config | `crates/config/src/lib.rs` | config format, round trip, escaping, limits, rules, resolving picks |
 | CLI | `crates/cli/src/*`, `crates/cli/tests/cli.rs` | configs, generator rules, discovery; the real binary end to end |
 | golden | `crates/cli/tests/golden.rs` | every sample matches its reviewed outputs (opt-in) |
 
@@ -75,7 +78,7 @@ The package's `.d.ts` carries the whole contract. Usage from TypeScript (in the 
 a Web Worker, T7):
 
 ```ts
-import init, { Palette, SourceImage } from 'rekolor-wasm';
+import init, { Palette, SourceImage, parseConfig, serializeConfig } from 'rekolor-wasm';
 
 await init();
 
@@ -97,7 +100,15 @@ const out = new ImageData(image.width, image.height);
 const result = image.recolor({ mappings }, new Uint8Array(out.data.buffer)); // writes into `out`
 
 image.free(); // or `using` / Symbol.dispose
+
+// Palette configs (*.palettes.toml, the golden-set format), read and written by `rekolor-config`:
+const parsed = parseConfig(tomlText);                         // Outcome<{ sections: [{ size, picks }] }>
+const picks = palette.value.resolveSection(section);          // inks must exist; matching colors from Rust
+const text = serializeConfig({ imageName: 'tiger.png', picks: [{ rgba, ink: 'Pantone 1595' }] });
 ```
+
+The `palettes.toml` support adds the TOML parser to the WASM file: about 306 KB (131 KB gzipped),
+up from 126 KB (56 KB gzipped) before.
 
 Every call that can fail on input returns `{ status: 'ok', value } | { status: 'error', error: { kind, message } }`
 (T5). Exceptions only signal programming mistakes or Rust panics, which `console_error_panic_hook`
@@ -168,6 +179,7 @@ only when their decoded pixels differ.
 | `testdata/baseline/pantone-suggestions.tsv` | `Palette::suggest` for the suggestion colors, with ΔE. Compared exactly. |
 | `testdata/baseline/delta-e-fingerprint.tsv` | ΔE fingerprint (R11): a hash over the `f32` bits of ΔE for 100,000 generated color pairs, plus exact values for a few pairs. Native and WASM tests must reproduce it bit for bit. |
 | `testdata/ciede2000-sharma.tsv` | CIEDE2000 reference data (not generated; see "Color math"). |
+| `testdata/decoders/` | Cross-decoder fixtures (M2): encoded images (opaque, EXIF PNG and JPEG, alpha ramp, ICC profile) and how `rekolor-io` decodes them (`<name>.rgba`, `references.tsv`). The web app's browser tests compare the browser's decoding with these. Regenerate with `cargo run --release -p rekolor-io --example update_decoder_fixtures`. |
 
 ### History
 

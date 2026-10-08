@@ -107,7 +107,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Recolor(args) => {
             let palette = palette_file::load(&palette_path()?)?;
             let mappings = match (&args.config, args.size) {
-                (Some(path), Some(size)) => PaletteConfig::load(path)?
+                (Some(path), Some(size)) => config::load(path)?
                     .size(size)?
                     .mappings(&palette)
                     .with_context(|| format!("{}", path.display()))?,
@@ -160,8 +160,11 @@ fn run(cli: Cli) -> Result<()> {
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                std::fs::write(&path, config.to_toml(&name, "rekolor palettes generate"))
-                    .with_context(|| format!("writing {}", path.display()))?;
+                std::fs::write(
+                    &path,
+                    config::golden_toml(&config, &name, "rekolor palettes generate"),
+                )
+                .with_context(|| format!("writing {}", path.display()))?;
                 let found: Vec<String> = config
                     .palette
                     .iter()
@@ -183,7 +186,7 @@ fn run(cli: Cli) -> Result<()> {
                     eprintln!("{}: no config, skipped", input.display());
                     continue;
                 }
-                let checked = PaletteConfig::load(&config_path).and_then(|config| {
+                let checked = config::load(&config_path).and_then(|config| {
                     config
                         .palette
                         .iter()

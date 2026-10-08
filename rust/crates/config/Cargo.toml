@@ -1,0 +1,14 @@
+[package]
+name = "rekolor-config"
+description = "Palette config files (`*.palettes.toml`): parse, validate, write, and turn into mappings; no file I/O"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+rekolor-core = { path = "../core" }
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.21"
+# Parsing only: the writer is a few lines here, and `display` would add to the WASM size.
+toml = { version = "1.1.6", default-features = false, features = ["parse", "serde", "std"] }

@@ -1,3 +1,5 @@
 .idea/
 .DS_Store
 .agents/
+# Playwright MCP plugin (Claude Code): page snapshots, screenshots, downloads
+.playwright-mcp/

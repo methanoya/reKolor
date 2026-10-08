@@ -1,0 +1,6 @@
+node_modules/
+dist/
+test-results/
+# Vitest browser mode: failure screenshots and attachments
+.vitest/
+__screenshots__/

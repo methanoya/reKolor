@@ -1300,11 +1300,19 @@ dependencies = [
  "clap",
  "env_logger",
  "log",
+ "rekolor-config",
  "rekolor-core",
  "rekolor-io",
- "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "rekolor-config"
+version = "0.2.0"
+dependencies = [
+ "rekolor-core",
+ "serde",
  "thiserror",
  "toml",
 ]
@@ -1340,6 +1348,7 @@ dependencies = [
  "js-sys",
  "log",
  "png",
+ "rekolor-config",
  "rekolor-core",
  "serde",
  "serde_json",

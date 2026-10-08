@@ -1,0 +1,6 @@
+# name	file	width	height	warnings
+opaque	opaque.png	48	32	
+exif-6-png	exif-6.png	16	24	OrientationApplied { exif_value: 6 }
+exif-6-jpeg	exif-6.jpg	32	64	OrientationApplied { exif_value: 6 }
+alpha-ramp	alpha-ramp.png	256	8	SemiTransparentPixels { count: 2032 }
+icc-swapped	icc-swapped.png	32	32	IccProfile { bytes: 524 }

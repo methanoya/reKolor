@@ -12,8 +12,10 @@ mod generator;
 
 use rekolor_core::Rgb8;
 use rekolor_wasm::{
-    ErrorKind, ImageStats, Mapping, Outcome, Palette, PaletteData, PaletteEntry, PaletteMatch,
-    PaletteMatches, Pick, RecolorRequest, RecolorStats, Rgb, Rgba, SourceImage,
+    ConfigExport, ConfigPick, ConfigSection, ConfigText, ErrorKind, ImageStats, Mapping, Outcome,
+    Palette, PaletteData, PaletteEntry, PaletteMatch, PaletteMatches, ParsedConfig, Pick,
+    RecolorRequest, RecolorStats, ResolvedPicks, Rgb, Rgba, SourceImage, parse_config,
+    serialize_config,
 };
 use serde::de::DeserializeOwned;
 use tsify::{Ts, Tsify};
@@ -491,4 +493,152 @@ fn nearest_ink_ties_go_to_the_earlier_mapping() {
         let _: RecolorStats = ok(read(gray.recolor(request, &mut out)));
         assert_eq!(out, expected);
     }
+}
+
+/// The Pantone palette as the app builds it (file order kept).
+fn pantone_palette() -> Palette {
+    let json: serde_json::Value =
+        serde_json::from_str(include_str!("../../../../palettes/pantone.json")).unwrap();
+    let entries = json
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(name, value)| {
+            let c: Vec<u8> = value["rgb"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_u64().unwrap() as u8)
+                .collect();
+            PaletteEntry {
+                name: name.clone(),
+                rgb: rgb([c[0], c[1], c[2]]),
+            }
+        })
+        .collect();
+    Palette::from_data(PaletteData { entries }).unwrap()
+}
+
+const SAMPLE_CONFIGS: &[&str] = &[
+    include_str!("../../../../samples/good-looking/04-tiger.palettes.toml"),
+    include_str!("../../../../samples/arbitrary/07-alpha-hue.palettes.toml"),
+    include_str!("../../../../samples/others/icon-calendar.palettes.toml"),
+];
+
+#[wasm_bindgen_test]
+fn sample_configs_parse_resolve_and_round_trip() {
+    // W10 v: the app reads the golden-set configs exactly like the CLI.
+    let palette = pantone_palette();
+    for text in SAMPLE_CONFIGS {
+        let parsed: ParsedConfig = ok(read(parse_config(text)));
+        assert_eq!(
+            parsed.sections.iter().map(|s| s.size).collect::<Vec<_>>(),
+            [3, 7, 16]
+        );
+        for section in &parsed.sections {
+            let resolved: ResolvedPicks = ok(read(
+                palette.resolve_section(Ts::from_rust(section).unwrap()),
+            ));
+            assert_eq!(resolved.picks.len(), section.picks.len());
+            for (pick, r) in section.picks.iter().zip(&resolved.picks) {
+                assert_eq!(r.pixel, pick.rgba);
+                assert_eq!(r.ink.name, pick.ink);
+            }
+            // Export (one section, size = number of picks) and read it back.
+            let export = ConfigExport {
+                image_name: "x.png".into(),
+                picks: section.picks.clone(),
+            };
+            let text: ConfigText = ok(read(serialize_config(Ts::from_rust(&export).unwrap())));
+            assert!(
+                text.text
+                    .starts_with("# Palette exported from the reKolor web app for x.png.")
+            );
+            let again: ParsedConfig = ok(read(parse_config(&text.text)));
+            assert_eq!(
+                again.sections,
+                [ConfigSection {
+                    size: section.picks.len() as u32,
+                    picks: section.picks.clone()
+                }]
+            );
+        }
+    }
+}
+
+#[wasm_bindgen_test]
+fn resolved_picks_are_composited_in_rust() {
+    let palette = pantone_palette();
+    let section = ConfigSection {
+        size: 2,
+        picks: vec![
+            ConfigPick {
+                rgba: Rgba {
+                    r: 9,
+                    g: 9,
+                    b: 9,
+                    a: 0,
+                },
+                ink: "Pure White (non-palette)".into(),
+            },
+            ConfigPick {
+                rgba: Rgba {
+                    r: 203,
+                    g: 0,
+                    b: 0,
+                    a: 100,
+                },
+                ink: "Pantone 185".into(),
+            },
+        ],
+    };
+    let resolved: ResolvedPicks = ok(read(
+        palette.resolve_section(Ts::from_rust(&section).unwrap()),
+    ));
+    assert_eq!(resolved.picks[0].matching, rgb([255, 255, 255]));
+    assert_eq!(resolved.picks[0].ink.delta_e, 0.0);
+    // The truncating core formula: (255 − 100) + 100 × 203 / 255 = 234 (not 235).
+    assert_eq!(resolved.picks[1].matching, rgb([234, 155, 155]));
+    assert_eq!(resolved.picks[1].ink.name, "Pantone 185");
+}
+
+#[wasm_bindgen_test]
+fn bad_configs_are_invalid_config_errors() {
+    let palette = pantone_palette();
+    for text in [
+        "",
+        "[[palette]\n",
+        "[[palette]]\nsize = 3\npicks = []\nextra = 1\n",
+        "[[palette]]\nsize = 3\npicks = []\n[[palette]]\nsize = 3\npicks = []\n",
+        "[[palette]]\nsize = 1\npicks = [{ rgba = [0, 0, 0, 255], ink = \"A\" }, { rgba = [1, 0, 0, 255], ink = \"B\" }]\n",
+    ] {
+        assert_eq!(
+            error_kind::<ParsedConfig>(read(parse_config(text))),
+            ErrorKind::InvalidConfig,
+            "{text:?}"
+        );
+    }
+    let oversized = format!("# {}\n", "x".repeat(256 * 1024));
+    assert_eq!(
+        error_kind::<ParsedConfig>(read(parse_config(&oversized))),
+        ErrorKind::InvalidConfig
+    );
+    let unknown = ConfigSection {
+        size: 1,
+        picks: vec![ConfigPick {
+            rgba: Rgba {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+            ink: "Pantone 99999".into(),
+        }],
+    };
+    assert_eq!(
+        error_kind::<ResolvedPicks>(read(
+            palette.resolve_section(Ts::from_rust(&unknown).unwrap())
+        )),
+        ErrorKind::InvalidConfig
+    );
 }

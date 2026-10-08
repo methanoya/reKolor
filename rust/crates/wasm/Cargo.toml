@@ -14,6 +14,7 @@ console_error_panic_hook = "0.1.7"
 console_log = "1.1.0"
 js-sys = "0.3.106"
 log = "0.4.34"
+rekolor-config = { path = "../config" }
 rekolor-core = { path = "../core" }
 serde = { version = "1.0.229", features = ["derive"] }
 tsify = { version = "0.5.8", default-features = false, features = ["js"] }

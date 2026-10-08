@@ -6,6 +6,8 @@ import { beforeAll, describe, expect, test } from 'vitest';
 import {
   Palette,
   SourceImage,
+  parseConfig,
+  serializeConfig,
   type PaletteData,
   type RecolorRequest,
   type Rgb,
@@ -232,5 +234,56 @@ describe('SourceImage', () => {
     expect(typeof image[Symbol.dispose]).toBe('function');
     image[Symbol.dispose]();
     expect(() => image.analyze()).toThrow();
+  });
+});
+
+describe('palette configs (W10 v)', () => {
+  test('a golden-set config parses, resolves against the palette and round-trips', async () => {
+    const text = await readFile(
+      new URL('../../../../../samples/good-looking/04-tiger.palettes.toml', import.meta.url),
+      'utf8',
+    );
+    const parsed = unwrap(parseConfig(text));
+    expect(parsed.sections.map((s) => s.size)).toEqual([3, 7, 16]);
+    const section = parsed.sections[0]!;
+
+    const palette = unwrap(Palette.create(await pantoneData()));
+    const resolved = unwrap(palette.resolveSection(section)).picks;
+    expect(resolved.map((p) => p.ink.name)).toEqual(section.picks.map((p) => p.ink));
+    expect(resolved[0]!.pixel).toEqual(section.picks[0]!.rgba);
+
+    const exported = unwrap(serializeConfig({ imageName: 'tiger.png', picks: section.picks })).text;
+    expect(exported).toMatch(/^# Palette exported from the reKolor web app for tiger\.png\./);
+    expect(unwrap(parseConfig(exported)).sections).toEqual([
+      { size: section.picks.length, picks: section.picks },
+    ]);
+    palette.free();
+  });
+
+  test('a transparent pick is matched as white, computed in Rust', async () => {
+    const palette = unwrap(Palette.create(await pantoneData()));
+    const [pick] = unwrap(
+      palette.resolveSection({
+        size: 1,
+        picks: [{ rgba: { r: 9, g: 9, b: 9, a: 0 }, ink: 'Pure White (non-palette)' }],
+      }),
+    ).picks;
+    expect(pick!.matching).toEqual({ r: 255, g: 255, b: 255 });
+    palette.free();
+  });
+
+  test('broken configs and unknown inks are invalidConfig errors', async () => {
+    for (const text of ['', '[[palette]', '[[palette]]\nsize = 3\npicks = []\nextra = 1\n']) {
+      const outcome = parseConfig(text);
+      expect(outcome.status).toBe('error');
+      if (outcome.status === 'error') expect(outcome.error.kind).toBe('invalidConfig');
+    }
+    const palette = unwrap(Palette.create(await pantoneData()));
+    const outcome = palette.resolveSection({
+      size: 1,
+      picks: [{ rgba: { r: 0, g: 0, b: 0, a: 255 }, ink: 'Pantone 99999' }],
+    });
+    expect(outcome).toMatchObject({ status: 'error', error: { kind: 'invalidConfig' } });
+    palette.free();
   });
 });

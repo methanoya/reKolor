@@ -1,7 +1,7 @@
 # The Rust workspace (R1, R2).
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/wasm", "crates/io", "crates/cli"]
+members = ["crates/core", "crates/config", "crates/wasm", "crates/io", "crates/cli"]
 
 [workspace.package]
 version = "0.2.0"

@@ -35,6 +35,8 @@ pub enum ErrorKind {
     EmptyPalette,
     /// A structured argument doesn't have the expected shape.
     InvalidInput,
+    /// A palette config can't be read, breaks a rule, or names an ink that isn't in the palette.
+    InvalidConfig,
 }
 
 impl From<core::Error> for ErrorInfo {

@@ -2,6 +2,7 @@
 // `@ts-expect-error` must really be an error. Never run, only type-checked.
 
 import type {
+  ConfigSection,
   ErrorKind,
   ImageStats,
   Outcome,
@@ -61,5 +62,14 @@ void unknownKind;
 // The palette argument of `pick` is required (there is no default palette).
 // @ts-expect-error
 image.pick(0, 0, undefined);
+
+// Config picks are { rgba: Rgba, ink: string }; the size is a number.
+const section: ConfigSection = { size: 1, picks: [{ rgba: { r: 1, g: 2, b: 3, a: 4 }, ink: 'x' }] };
+void section;
+// @ts-expect-error
+const badSection: ConfigSection = { size: 1, picks: [{ rgba: [1, 2, 3, 4], ink: 'x' }] };
+void badSection;
+const configKind: ErrorKind = 'invalidConfig';
+void configKind;
 
 export {};

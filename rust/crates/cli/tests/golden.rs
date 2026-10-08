@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use rekolor_cli::config::{self, PaletteConfig};
+use rekolor_cli::config;
 use rekolor_cli::{discover, palette_file};
 use rekolor_core::recolor;
 
@@ -79,7 +79,7 @@ fn every_sample_matches_its_reviewed_golden_outputs() {
     for input in discover::images(&samples).unwrap() {
         let name = input.strip_prefix(&samples).unwrap().display().to_string();
         let config_path = config::config_path(&input);
-        let config = match PaletteConfig::load(&config_path) {
+        let config = match config::load(&config_path) {
             Ok(config) => config,
             Err(e) => {
                 failures.push(format!("{name}: {e:#}"));

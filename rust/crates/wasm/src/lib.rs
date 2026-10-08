@@ -10,11 +10,16 @@
 //!
 //! Must never depend on `rekolor-io` (that would pull the `image` crate into the WASM build).
 
+mod config;
 mod image;
 mod outcome;
 mod palette;
 mod types;
 
+pub use config::{
+    ConfigExport, ConfigPick, ConfigSection, ConfigText, ParsedConfig, ResolvedPick, ResolvedPicks,
+    parse_config, serialize_config,
+};
 pub use image::SourceImage;
 pub use image::SourceImageOutcome;
 pub use outcome::{
