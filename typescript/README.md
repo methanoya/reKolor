@@ -62,10 +62,12 @@ main thread (Svelte)                      worker (src/lib/worker.ts)
   have no circle. Moving needs a mouse or pen and a keyboard; there is no touch or keyboard-only way.
   Circles are drawn on their own canvas, so the color read for the warning above is never a circle.
 - **Material:** the garment or surface color, at the bottom right ("Material": a color input,
-  "White" and "Black"). None at first: the swatch and both frames show the checkerboard, and the
-  engine composites over white. Once chosen, every engine call composites over it (picks, the
-  preview, the color count), and both frames show it behind the image (as the frame's background,
-  never in the image canvas). It applies live while the picker is open: inputs merge into the queued
+  "White", "Black" and "Reset", which goes back to none). None at first: the swatch and both frames
+  show the checkerboard, and the engine composites over white. Once chosen, every engine call
+  composites over it (picks, the preview, the color count), and the preview's frame shows it behind
+  the result (as the frame's background, never in the image canvas); the Original keeps the
+  checkerboard. Until the first pick nothing is printed: the preview shows only the material (or the
+  checkerboard), and there is nothing to download. It applies live while the picker is open: inputs merge into the queued
   change while it hasn't started and nothing else was queued after it (`Serial.coalescing`), so a
   burst is one change and a change never passes another pick-list change made before it. A change
   re-matches the picks: one whose composited color changed gets the nearest ink again; the others

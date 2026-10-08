@@ -311,8 +311,22 @@
     queueMaterial({ color, input: ++materialInputs });
   }
 
-  /** Applies material input number `input` (runs inside `mutations`). */
-  async function applyMaterial({ color: next, input }: { color: Rgb; input: number }) {
+  /** Back to "none" (U11): the picks are re-matched on white, the material's own entry goes. */
+  function resetMaterial() {
+    materialInput = hex(WHITE);
+    queueMaterial({ color: WHITE, input: ++materialInputs, reset: true });
+  }
+
+  /** Applies material input number `input` (runs inside `mutations`); `reset`: back to "none". */
+  async function applyMaterial({
+    color: next,
+    input,
+    reset = false,
+  }: {
+    color: Rgb;
+    input: number;
+    reset?: boolean;
+  }) {
     const changed = !sameRgb(next, material);
     let resuggested = 0;
     if (changed) {
@@ -330,10 +344,20 @@
       }
       material = next;
     }
-    // Choosing a material (even the one in use) leaves its own color unprinted (U7).
-    materialChosen = true;
-    setMaterialRange(next);
-    status = `Material ${hex(next)}${resuggested ? ` · ${resuggested} pick${resuggested === 1 ? '' : 's'} re-suggested` : ''}.`;
+    const changes = resuggested
+      ? ` · ${resuggested} pick${resuggested === 1 ? '' : 's'} re-suggested`
+      : '';
+    if (reset) {
+      materialChosen = false;
+      for (const r of ranges) if (r.material) deltaQueues.delete(r.id);
+      ranges = ranges.filter((r) => !r.material);
+      status = `Material reset${changes}.`;
+    } else {
+      // Choosing a material (even the one in use) leaves its own color unprinted (U7).
+      materialChosen = true;
+      setMaterialRange(next);
+      status = `Material ${hex(next)}${changes}.`;
+    }
     requestRecolor();
     if (changed && image) void countColors();
   }
@@ -645,6 +669,14 @@
   function requestRecolor() {
     if (!image) return;
     revision++;
+    if (picks.length === 0) {
+      // U10: nothing is printed before the first pick; the preview shows only the material (or the
+      // checkerboard), and there is nothing to download. Older results are dropped (revision).
+      result?.close();
+      result = undefined;
+      resultRevision = -1;
+      return;
+    }
     recolorer.request({
       generation,
       revision,
@@ -743,11 +775,6 @@
     ['r', '#70369d'],
   ];
 
-  /** How labels name the material. */
-  const onMaterial = $derived(
-    sameRgb(material, WHITE) ? 'white' : `the material (${hex(material)})`,
-  );
-
   const megabytes = (n: number) =>
     n < 1024 * 1024 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
 </script>
@@ -836,17 +863,16 @@
       onpick={pickAt}
       onmove={(move) => mover.update(move)}
       onmovecancel={(drag) => mover.cancel(drag)}
-      backdrop={materialChosen ? css(material) : undefined}
     />
     <ImageView
       label={!image
         ? 'Preview'
         : picks.length === 0
-          ? `No picks yet: the image as printed on ${onMaterial}`
+          ? 'No picks yet: nothing is printed'
           : `Printed with ${picks.length} ink${picks.length === 1 ? '' : 's'}${ranges.length ? ` · ${ranges.length} color${ranges.length === 1 ? '' : 's'} left to the material` : ''}${recoloring ? ' · updating…' : ''}`}
       bitmap={result}
       {view}
-      placeholder={image ? 'Recoloring…' : 'The preview appears here.'}
+      placeholder={!image ? 'The preview appears here.' : picks.length === 0 ? '' : 'Recoloring…'}
       onview={(v) => (view = v)}
       onviewport={() => {}}
       backdrop={materialChosen ? css(material) : undefined}
@@ -925,6 +951,7 @@
           onclick={() => setMaterial(BLACK)}
           disabled={materialChosen && materialInput === hex(BLACK)}>Black</button
         >
+        <button type="button" onclick={resetMaterial} disabled={!materialChosen}>Reset</button>
       </div>
 
       <div class="unprinted-header">

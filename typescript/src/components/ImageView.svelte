@@ -295,7 +295,7 @@
       }}
     ></canvas>
     <canvas bind:this={overlay} class="overlay" aria-hidden="true"></canvas>
-    {#if !bitmap}
+    {#if !bitmap && placeholder}
       <p class="placeholder">{placeholder}</p>
     {/if}
   </div>

@@ -30,7 +30,7 @@ try {
   await page.goto(url);
   await page.getByText(/Engine ready/).waitFor({ timeout: 15_000 });
   await page.locator('#file').setInputFiles(sample);
-  await page.getByText('No picks yet: the image as printed on white').waitFor({ timeout: 15_000 });
+  await page.getByText('No picks yet: nothing is printed').waitFor({ timeout: 15_000 });
   const canvas = page.locator('canvas').first();
   const box = await canvas.boundingBox();
   if (!box) throw new Error('the original canvas has no size');

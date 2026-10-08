@@ -65,7 +65,7 @@ describe('Engine', () => {
     });
     expect(value(engine.colorCount(WHITE))).toBe(2);
 
-    // Zero picks (WA4): the image as printed on white.
+    // Zero picks (the engine's I8 c): the image as printed on white; the app shows nothing then (U10).
     expect([...value(engine.recolor([], WHITE))]).toEqual([230, 76, 60, 255, 255, 255, 255, 255]);
     const ink = { r: 58, g: 117, b: 196 };
     const out = value(engine.recolor([{ source: { r: 230, g: 76, b: 60 }, ink }], WHITE));

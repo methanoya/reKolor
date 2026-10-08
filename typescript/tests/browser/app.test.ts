@@ -33,9 +33,7 @@ describe('reKolor app', () => {
     const input = screen.container.querySelector<HTMLInputElement>('#file')!;
     await userEvent.upload(page.elementLocator(input), await fixtureFile('opaque'));
     await expect.element(screen.getByTestId('file-info')).toMatchTextContent('48 × 32');
-    await expect
-      .element(screen.getByText('No picks yet: the image as printed on white'))
-      .toBeVisible();
+    await expect.element(screen.getByText('No picks yet: nothing is printed')).toBeVisible();
 
     // Zoom to 1:1 so the click maps to an exact pixel, then click the canvas center.
     await screen.getByRole('button', { name: '1:1' }).click();
@@ -66,9 +64,7 @@ describe('reKolor app', () => {
     await expect.element(screen.getByText(/Engine ready/)).toBeVisible();
     const input = screen.container.querySelector<HTMLInputElement>('#file')!;
     await userEvent.upload(page.elementLocator(input), await fixtureFile('opaque'));
-    await expect
-      .element(screen.getByText('No picks yet: the image as printed on white'))
-      .toBeVisible();
+    await expect.element(screen.getByText('No picks yet: nothing is printed')).toBeVisible();
 
     const config = new File(
       [
@@ -91,9 +87,7 @@ describe('reKolor app', () => {
     await expect.element(screen.getByText(/Engine ready/)).toBeVisible();
     const input = screen.container.querySelector<HTMLInputElement>('#file')!;
     await userEvent.upload(page.elementLocator(input), await fixtureFile('opaque'));
-    await expect
-      .element(screen.getByText('No picks yet: the image as printed on white'))
-      .toBeVisible();
+    await expect.element(screen.getByText('No picks yet: nothing is printed')).toBeVisible();
 
     const junk = new File([new Uint8Array([1, 2, 3, 4])], 'broken.png', { type: 'image/png' });
     await userEvent.upload(page.elementLocator(input), junk);
@@ -120,9 +114,7 @@ describe('reKolor app', () => {
     await expect.element(screen.getByText(/Engine ready/)).toBeVisible();
     const input = screen.container.querySelector<HTMLInputElement>('#file')!;
     await userEvent.upload(page.elementLocator(input), await fixtureFile('opaque'));
-    await expect
-      .element(screen.getByText('No picks yet: the image as printed on white'))
-      .toBeVisible();
+    await expect.element(screen.getByText('No picks yet: nothing is printed')).toBeVisible();
 
     const config = (inks: string[]) =>
       new File(
@@ -172,9 +164,7 @@ describe('reKolor app', () => {
     await expect.element(screen.getByText(/Engine ready/)).toBeVisible();
     const input = screen.container.querySelector<HTMLInputElement>('#file')!;
     await userEvent.upload(page.elementLocator(input), file);
-    await expect
-      .element(screen.getByText('No picks yet: the image as printed on white'))
-      .toBeVisible();
+    await expect.element(screen.getByText('No picks yet: nothing is printed')).toBeVisible();
     await screen.getByRole('button', { name: '1:1' }).click();
     const canvas = screen.container.querySelector<HTMLCanvasElement>(ORIGINAL)!;
     const box = canvas.getBoundingClientRect();
@@ -501,8 +491,8 @@ describe('reKolor app', () => {
     [...screen.container.querySelectorAll('.range-color')].map((e) => e.textContent!.trim());
   const materialInput = (screen: { container: HTMLElement }) =>
     screen.container.querySelector<HTMLInputElement>('[data-testid=material]')!;
-  const originalFrame = (screen: { container: HTMLElement }) =>
-    screen.container.querySelector(ORIGINAL)!.closest<HTMLElement>('.frame')!;
+  /** The preview's frame: the material is behind it (U2), not behind the Original (U9). */
+  const previewFrame = (screen: { container: HTMLElement }) => frames(screen)[1]!;
 
   /** The RGBA pixel at (x, y) of the downloaded PNG. */
   async function downloadedPixel(
@@ -518,51 +508,60 @@ describe('reKolor app', () => {
     return [...context.getImageData(x, y, 1, 1).data];
   }
 
-  test('M5, M6, U2, U6: no material at first; a chosen one is behind both images', async () => {
-    const screen = await render(App);
-    await expect.element(screen.getByText(/Engine ready/)).toBeVisible();
-    const input = screen.container.querySelector<HTMLInputElement>('#file')!;
-    await userEvent.upload(page.elementLocator(input), await materialFile());
-    await expect
-      .element(screen.getByText('No picks yet: the image as printed on white'))
-      .toBeVisible();
-    // U6: "none": a checkerboard swatch and frames, both buttons available, nothing unprinted.
+  test('U6, U9, U10: no material at first; a chosen one is behind the preview only', async () => {
+    const { screen, click, status } = await opened(await materialFile(), []);
+    const [original, preview] = frames(screen) as [HTMLElement, HTMLElement];
+    const download = screen.getByTestId('download');
+    const white = screen.getByRole('button', { name: 'White' });
+    // U6: "none": a checkerboard swatch and frames, White and Black available, nothing unprinted.
     expect(screen.container.querySelector('.material-swatch.none')).not.toBeNull();
-    for (const frame of frames(screen)) {
+    for (const frame of [original, preview]) {
       expect(getComputedStyle(frame).backgroundImage).toMatch(/conic-gradient/);
     }
-    const white = screen.getByRole('button', { name: 'White' });
-    const black = screen.getByRole('button', { name: 'Black' });
     await expect.element(white).toBeEnabled();
-    await expect.element(black).toBeEnabled();
+    await expect.element(screen.getByRole('button', { name: 'Black' })).toBeEnabled();
+    await expect.element(screen.getByRole('button', { name: 'Reset' })).toBeDisabled();
     expect(rangeRows(screen)).toEqual([]);
+    // U10: no picks, nothing printed: an empty preview without a placeholder, nothing to download.
+    expect(preview.classList.contains('empty')).toBe(true);
+    expect(preview.querySelector('.placeholder')).toBeNull();
+    await expect.element(download).toBeDisabled();
 
     await userEvent.fill(screen.getByTestId('material'), '#102030');
-    await expect
-      .element(screen.getByText('No picks yet: the image as printed on the material (#102030)'))
-      .toBeVisible();
-    // C5 a, U2: both frames' background, not drawn into the image canvas; no checkerboard.
-    for (const frame of frames(screen)) {
-      expect(getComputedStyle(frame).backgroundColor).toBe('rgb(16, 32, 48)');
-      expect(getComputedStyle(frame).backgroundImage).toBe('none');
-    }
-    expect(screen.container.querySelector('.material-swatch.none')).toBeNull();
-    // U7, U8: the material's own color is left unprinted, so the transparent band (the material)
-    // is transparent in the result; the opaque red band is printed.
+    await expect.element(status).toHaveTextContent('Material #102030.');
+    // U9: the material is behind the preview only (its frame, not its canvas); the Original keeps
+    // the checkerboard.
+    expect(getComputedStyle(preview).backgroundColor).toBe('rgb(16, 32, 48)');
+    expect(getComputedStyle(preview).backgroundImage).toBe('none');
+    expect(getComputedStyle(original).backgroundImage).toMatch(/conic-gradient/);
+    // U10: still nothing printed, so only the material shows.
+    expect(preview.classList.contains('empty')).toBe(true);
+    await expect.element(screen.getByText('No picks yet: nothing is printed')).toBeVisible();
+    await expect.element(download).toBeDisabled();
     expect(rangeRows(screen)).toEqual(['Material color · #102030']);
+
+    // The first pick prints; the material's own color (the transparent band) stays unprinted (U8).
+    await click(-18);
+    await expect.element(screen.getByText(/^Printed with 1 ink/)).toBeVisible();
+    await expect.poll(() => preview.classList.contains('empty')).toBe(false);
+    await expect.element(download).toBeEnabled();
     expect(await downloadedPixel(screen, 30, 16)).toEqual([0, 0, 0, 0]);
     expect((await downloadedPixel(screen, 6, 16))[3]).toBe(255);
 
     await white.click();
-    await expect
-      .element(screen.getByText('No picks yet: the image as printed on white'))
-      .toBeVisible();
+    await expect.element(status).toHaveTextContent('Material #ffffff.');
     expect(materialInput(screen).value).toBe('#ffffff');
-    expect(getComputedStyle(originalFrame(screen)).backgroundColor).toBe('rgb(255, 255, 255)');
+    expect(getComputedStyle(preview).backgroundColor).toBe('rgb(255, 255, 255)');
+    expect(getComputedStyle(original).backgroundImage).toMatch(/conic-gradient/);
     await expect.element(white).toBeDisabled();
-    await expect.element(black).toBeEnabled();
     expect(rangeRows(screen)).toEqual(['Material color · #ffffff']);
     expect(await downloadedPixel(screen, 30, 16)).toEqual([0, 0, 0, 0]);
+
+    // Without picks again, nothing is printed again.
+    await screen.getByRole('button', { name: 'Clear all' }).click();
+    await expect.element(screen.getByText('No picks yet: nothing is printed')).toBeVisible();
+    await expect.poll(() => preview.classList.contains('empty')).toBe(true);
+    await expect.element(download).toBeDisabled();
   });
 
   test('M3 a, M3.1 b: a material change re-suggests only the picks whose color changed', async () => {
@@ -642,7 +641,7 @@ describe('reKolor app', () => {
       .element(status)
       .toHaveTextContent('Imported 1 pick (size 1) from one.palettes.toml, on material #102030.');
     expect(materialInput(screen).value).toBe('#102030');
-    expect(getComputedStyle(originalFrame(screen)).backgroundColor).toBe('rgb(16, 32, 48)');
+    expect(getComputedStyle(previewFrame(screen)).backgroundColor).toBe('rgb(16, 32, 48)');
     // The transparent pick is matched on the file's material.
     const matching = () =>
       screen.container.querySelector<HTMLElement>('.pick .swatch:not(.checker):not(.ink)')!.title;
@@ -729,7 +728,7 @@ describe('reKolor app', () => {
     held[0]!();
 
     await expect.element(status).toMatchTextContent('Material #000000');
-    expect(getComputedStyle(originalFrame(screen)).backgroundColor).toBe('rgb(0, 0, 0)');
+    expect(getComputedStyle(previewFrame(screen)).backgroundColor).toBe('rgb(0, 0, 0)');
     expect(input.value).toBe('#000000');
     // The imported pick, re-matched on B.
     const title = screen.container.querySelector<HTMLElement>(
@@ -932,5 +931,36 @@ describe('reKolor app', () => {
     const text = await (await download).blob.text();
     expect(text).toContain('{ rgba = [200, 40, 40, 255], delta_e = 60 }');
     expect(text).toContain('{ rgba = [0, 0, 0, 255], delta_e = 30 }');
+  });
+
+  test('U11: Reset goes back to no material and keeps the clicked unprinted colors', async () => {
+    // A translucent pick: its color changes with the material.
+    const { screen, at, status } = await opened(await materialFile(), [-6]);
+    const reset = screen.getByRole('button', { name: 'Reset' });
+    await screen.getByRole('button', { name: 'Black' }).click();
+    await expect.element(status).toHaveTextContent('Material #000000 · 1 pick re-suggested.');
+    await screen.getByRole('button', { name: 'Leave a color unprinted' }).click();
+    await userEvent.click(page.elementLocator(screen.container.querySelector(ORIGINAL)!), {
+      position: at(-15),
+    });
+    await expect.element(status).toMatchTextContent('Left to the material');
+    expect(rangeRows(screen)).toEqual(['Material color · #000000', 'rgb 200, 40, 40']);
+    await expect.element(reset).toBeEnabled();
+
+    await reset.click();
+    await expect.element(status).toHaveTextContent('Material reset · 1 pick re-suggested.');
+    // "None" again: swatch, frames, the material's own entry gone (the clicked one stays).
+    expect(screen.container.querySelector('.material-swatch.none')).not.toBeNull();
+    for (const frame of frames(screen)) {
+      expect(getComputedStyle(frame).backgroundImage).toMatch(/conic-gradient/);
+    }
+    expect(rangeRows(screen)).toEqual(['rgb 200, 40, 40']);
+    expect(materialInput(screen).value).toBe('#ffffff');
+    await expect.element(reset).toBeDisabled();
+    // The pick is matched on white again.
+    const matching = screen.container.querySelector<HTMLElement>(
+      '.pick .swatch:not(.checker):not(.ink)',
+    )!;
+    expect(matching.title).toMatch(/^On white: #/);
   });
 });
