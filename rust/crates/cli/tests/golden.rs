@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use rekolor_cli::config;
 use rekolor_cli::{discover, palette_file};
-use rekolor_core::recolor;
+use rekolor_core::{Rgb8, recolor};
 
 fn repo_root() -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../.."))
@@ -107,9 +107,10 @@ fn every_sample_matches_its_reviewed_golden_outputs() {
                 ));
                 continue;
             }
-            let mappings = sized.mappings(&palette).unwrap();
+            let material = Rgb8::from(config.material);
+            let mappings = sized.mappings(&palette, material).unwrap();
             let mut out = vec![0; image.rgba().len()];
-            recolor(image.view(), &mappings, &mut out).unwrap();
+            recolor(image.view(), &mappings, material, &mut out).unwrap();
             if let Some(report) =
                 compare(&label, image.width(), image.height(), golden.rgba(), &out)
             {

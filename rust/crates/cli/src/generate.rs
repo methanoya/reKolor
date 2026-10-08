@@ -2,7 +2,8 @@
 //! each other, each mapped to its suggested ink, up to N distinct inks (X1).
 //!
 //! Rule (deterministic):
-//! 1. Group pixels by their matching color (composited over white, as an interactive pick is),
+//! 1. Group pixels by their matching color (composited over the material, as an interactive pick
+//!    is),
 //!    coarsened to 16 levels per channel so photo noise doesn't fragment a color into thousands
 //!    of groups. Each group's representative is its most frequent exact pixel value.
 //! 2. Candidates: the [`CANDIDATES`] most frequent groups ("predominant").
@@ -15,7 +16,7 @@
 
 use std::collections::HashMap;
 
-use rekolor_core::{ImageRef, Palette, Rgb8, Rgba8, composite_over_white, delta_e_2000};
+use rekolor_core::{ImageRef, Palette, Rgb8, Rgba8, composite, delta_e_2000};
 
 /// How many of the most frequent color groups are considered.
 pub const CANDIDATES: usize = 64;
@@ -27,8 +28,14 @@ pub struct GeneratedPick {
     pub ink_index: usize,
 }
 
-/// Up to `max` picks with distinct inks, in selection order; take the first N for size N.
-pub fn picks(image: ImageRef<'_>, palette: &Palette, max: usize) -> Vec<GeneratedPick> {
+/// Up to `max` picks with distinct inks, in selection order; take the first N for size N. Colors
+/// are matched as composited over `material`.
+pub fn picks(
+    image: ImageRef<'_>,
+    palette: &Palette,
+    material: Rgb8,
+    max: usize,
+) -> Vec<GeneratedPick> {
     // Exact pixel counts.
     let mut exact: HashMap<Rgba8, u64> = HashMap::new();
     for p in image.pixels() {
@@ -41,7 +48,7 @@ pub fn picks(image: ImageRef<'_>, palette: &Palette, max: usize) -> Vec<Generate
     // Groups: total count and most frequent exact pixel (ties: the smaller value, from the sort).
     let mut groups: HashMap<[u8; 3], (u64, Rgba8, u64)> = HashMap::new();
     for (pixel, count) in exact {
-        let Rgb8 { r, g, b } = composite_over_white(pixel);
+        let Rgb8 { r, g, b } = composite(pixel, material);
         let group = groups
             .entry([r >> 4, g >> 4, b >> 4])
             .or_insert((0, pixel, 0));
@@ -60,7 +67,7 @@ pub fn picks(image: ImageRef<'_>, palette: &Palette, max: usize) -> Vec<Generate
 
     let mut remaining: Vec<(Rgba8, Rgb8, u64)> = candidates
         .into_iter()
-        .map(|(_, count, pixel)| (pixel, composite_over_white(pixel), count))
+        .map(|(_, count, pixel)| (pixel, composite(pixel, material), count))
         .collect();
     let mut chosen: Vec<(GeneratedPick, Rgb8)> = Vec::new();
     while chosen.len() < max && !remaining.is_empty() {
@@ -135,7 +142,7 @@ mod tests {
             ([215, 35, 35, 255], 5),    // red
         ]);
         let p = palette();
-        let picks = picks(view(&rgba), &p, 3);
+        let picks = picks(view(&rgba), &p, Rgb8::WHITE, 3);
         let inks: Vec<_> = picks
             .iter()
             .map(|g| p.entries()[g.ink_index].name.as_str())
@@ -154,7 +161,7 @@ mod tests {
             ([180, 30, 30, 255], 10),
         ]);
         let p = palette();
-        let picks = picks(view(&rgba), &p, 16);
+        let picks = picks(view(&rgba), &p, Rgb8::WHITE, 16);
         let mut inks: Vec<_> = picks.iter().map(|g| g.ink_index).collect();
         assert_eq!(inks.len(), 2);
         inks.dedup();
@@ -167,18 +174,26 @@ mod tests {
             .flat_map(|i| [(i * 7) as u8, (i * 13) as u8, (i * 29) as u8, 255])
             .collect();
         let p = palette();
-        let five = picks(view(&rgba), &p, 5);
-        let three = picks(view(&rgba), &p, 3);
+        let five = picks(view(&rgba), &p, Rgb8::WHITE, 5);
+        let three = picks(view(&rgba), &p, Rgb8::WHITE, 3);
         assert_eq!(&five[..3], &three[..]);
-        assert_eq!(picks(view(&rgba), &p, 5), five);
+        assert_eq!(picks(view(&rgba), &p, Rgb8::WHITE, 5), five);
     }
 
     #[test]
-    fn transparent_pixels_count_as_white() {
+    fn transparent_pixels_count_as_the_material() {
         let rgba = image(&[([0, 0, 0, 0], 50), ([10, 10, 10, 255], 10)]);
         let p = palette();
-        let picks = picks(view(&rgba), &p, 2);
-        assert_eq!(p.entries()[picks[0].ink_index].name, "White");
-        assert_eq!(picks[0].rgba, Rgba8::new(0, 0, 0, 0));
+        let on_white = picks(view(&rgba), &p, Rgb8::WHITE, 2);
+        assert_eq!(p.entries()[on_white[0].ink_index].name, "White");
+        assert_eq!(on_white[0].rgba, Rgba8::new(0, 0, 0, 0));
+        assert_eq!(p.entries()[on_white[1].ink_index].name, "Black");
+
+        // On black, the transparent pixels and the near-black ones are one group (the transparent
+        // pixels, more frequent, represent it), so only one ink is found.
+        let on_black = picks(view(&rgba), &p, Rgb8::new(0, 0, 0), 2);
+        assert_eq!(on_black.len(), 1);
+        assert_eq!(p.entries()[on_black[0].ink_index].name, "Black");
+        assert_eq!(on_black[0].rgba, Rgba8::new(0, 0, 0, 0));
     }
 }

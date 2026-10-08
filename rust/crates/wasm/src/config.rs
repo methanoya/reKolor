@@ -27,6 +27,8 @@ pub struct ConfigSection {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Tsify)]
 pub struct ParsedConfig {
+    /// The material color, for every section; white when the file has no `material` line.
+    pub material: Rgb,
     /// In file order.
     pub sections: Vec<ConfigSection>,
 }
@@ -36,7 +38,8 @@ pub struct ParsedConfig {
 pub struct ResolvedPick {
     /// The stored pixel color from the config.
     pub pixel: Rgba,
-    /// `pixel` composited over white: what recolor matches (computed in Rust, as for a click).
+    /// `pixel` composited over the material: what recolor matches (computed in Rust, as for a
+    /// click).
     pub matching: Rgb,
     /// The named ink, with its distance from `matching`.
     pub ink: PaletteMatch,
@@ -54,6 +57,8 @@ pub struct ResolvedPicks {
 pub struct ConfigExport {
     /// The image's file name, mentioned in the header.
     pub image_name: String,
+    /// The material the picks were made on; always written.
+    pub material: Rgb,
     pub picks: Vec<ConfigPick>,
 }
 
@@ -106,6 +111,7 @@ impl From<ConfigPick> for config::ConfigPick {
 pub fn parse_config(text: &str) -> ParsedConfigOutcome {
     let outcome = config::PaletteConfig::parse(text)
         .map(|c| ParsedConfig {
+            material: core::Rgb8::from(c.material).into(),
             sections: c
                 .palette
                 .iter()
@@ -127,7 +133,9 @@ pub fn serialize_config(request: Ts<ConfigExport>) -> ConfigTextOutcome {
         .map_err(ErrorInfo::from)
         .and_then(|request| {
             let size = u32::try_from(request.picks.len()).unwrap_or(u32::MAX);
+            let Rgb { r, g, b } = request.material;
             let config = config::PaletteConfig {
+                material: [r, g, b],
                 palette: vec![config::SizedPalette {
                     size,
                     picks: request.picks.into_iter().map(Into::into).collect(),
@@ -146,7 +154,11 @@ pub fn serialize_config(request: Ts<ConfigExport>) -> ConfigTextOutcome {
 }
 
 impl Palette {
-    pub(crate) fn resolve(&self, section: ConfigSection) -> Result<ResolvedPicks, ErrorInfo> {
+    pub(crate) fn resolve(
+        &self,
+        section: ConfigSection,
+        material: Rgb,
+    ) -> Result<ResolvedPicks, ErrorInfo> {
         let sized = config::SizedPalette {
             size: section.size,
             picks: section.picks.into_iter().map(Into::into).collect(),
@@ -154,7 +166,7 @@ impl Palette {
         sized.validate()?;
         let palette = self.core();
         let picks = sized
-            .resolve(palette)?
+            .resolve(palette, material.into())?
             .into_iter()
             .map(|p| {
                 let entry = &palette.entries()[p.index];
@@ -177,13 +189,18 @@ impl Palette {
 impl Palette {
     /// Resolves a config section against this palette: every ink must be a palette entry (an
     /// unknown name is an `invalidConfig` error; nothing is skipped), and each pick's matching
-    /// color is its pixel composited over white. Picks keep their order.
+    /// color is its pixel composited over `material` (the config's, from `parseConfig`). Picks
+    /// keep their order.
     #[wasm_bindgen(js_name = resolveSection)]
-    pub fn resolve_section(&self, section: Ts<ConfigSection>) -> ResolvedPicksOutcome {
-        let outcome = section
-            .to_rust()
-            .map_err(ErrorInfo::from)
-            .and_then(|s| self.resolve(s));
+    pub fn resolve_section(
+        &self,
+        section: Ts<ConfigSection>,
+        material: Ts<Rgb>,
+    ) -> ResolvedPicksOutcome {
+        let outcome = section.to_rust().map_err(ErrorInfo::from).and_then(|s| {
+            let material = material.to_rust().map_err(ErrorInfo::from)?;
+            self.resolve(s, material)
+        });
         outcome_js(Outcome::from(outcome))
     }
 }

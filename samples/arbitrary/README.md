@@ -33,9 +33,9 @@ interactive browser tests reasonably fast.
    useful for checking that clicking the same source RGB value twice does not add
    duplicate choices.
 5. Use `07-alpha-hue.png` as an edge-case test. The current implementation
-   composites RGBA pixels against white before matching and emits an opaque PNG,
-   so transparency loss should be recorded explicitly as current behavior or as
-   a bug, depending on product intent.
+   composites RGBA pixels against the material color (white by default) before
+   matching and emits an opaque PNG, so transparency loss should be recorded
+   explicitly as current behavior or as a bug, depending on product intent.
 6. Use the red type image at 100% zoom. Check thin strokes and curved edges for
    halos or broken contours after palette reduction.
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ConfigSection, Rgba } from 'rekolor-wasm';
+  import type { ConfigSection, Rgb, Rgba } from 'rekolor-wasm';
   import { onDestroy } from 'svelte';
   import ImageView from './components/ImageView.svelte';
   import PickList from './components/PickList.svelte';
@@ -9,7 +9,16 @@
   import { Mover, type Marker } from './lib/moves';
   import { LIMITS } from './lib/limits';
   import type { AppOutcome } from './lib/outcome';
-  import { mappings, sameRgb, type PickEntry, type PickMove } from './lib/picks';
+  import {
+    WHITE,
+    css,
+    fromHex,
+    hex,
+    mappings,
+    sameRgb,
+    type PickEntry,
+    type PickMove,
+  } from './lib/picks';
   import { Serial } from './lib/serial';
   import { fit, resize, zoomAt, type Size, type View } from './lib/view';
 
@@ -61,6 +70,19 @@
   const mutations = new Serial();
   /** The pick being Shift-dragged: its marker follows the pointer until the move settles. */
   let moving = $state<Marker>();
+  /**
+   * The material color (the garment or substrate) every engine call composites over. Changed only
+   * inside a `mutations` task, together with the picks re-matched on it, so the two always agree.
+   * Kept across new images and worker restarts.
+   */
+  let material = $state.raw<Rgb>(WHITE);
+  /** What the color input shows: the user's newest choice, maybe not applied yet. */
+  let materialInput = $state(hex(WHITE));
+  /**
+   * Material inputs so far. An action (a material change, an import) writes `materialInput` only if
+   * no input came after it, so the input never jumps back from a newer choice.
+   */
+  let materialInputs = 0;
 
   let view = $state<View>({ scale: 1, x: 0, y: 0 });
   let viewport: Size = { width: 0, height: 0 };
@@ -117,8 +139,17 @@
     view = fit(image, viewport);
     status = 'Click a color in the original to pick it.';
     requestRecolor();
-    const counted = await client.call((api) => api.colorCount(gen));
-    if (gen === generation && counted.status === 'ok') colors = counted.value;
+    await countColors();
+  }
+
+  /** Counts the current image's colors on the current material (shown in the toolbar). */
+  async function countColors() {
+    const gen = generation;
+    const on = material;
+    colors = undefined;
+    const counted = await client.call((api) => api.colorCount(gen, on));
+    // Only for the image and material it was made for.
+    if (gen === generation && on === material && counted.status === 'ok') colors = counted.value;
   }
 
   // ── Picks ────────────────────────────────────────────────────────────────────────────────────
@@ -130,7 +161,8 @@
         status = `At most ${LIMITS.picks} picks.`;
         return;
       }
-      const picked = await client.call((api) => api.pick(gen, x, y, seen));
+      const on = material;
+      const picked = await client.call((api) => api.pick(gen, x, y, on, seen));
       if (gen !== generation) return;
       if (picked.status === 'error') {
         error = picked.error.message;
@@ -167,17 +199,26 @@
   // already has is skipped; on release the pick stays at its last valid pixel (F2 a). Escape or a
   // lost pointer cancels: the pick is put back as it was (F1 a). Ordering and coalescing: `Mover`.
 
-  const mover = new Mover<PickEntry>({
+  const mover = new Mover<{ pick: PickEntry; material: Rgb }>({
     queue: (task) => mutations.run(task),
     apply: applyMove,
     save: (id) => {
       const pick = picks.find((p) => p.id === id);
-      return pick && $state.snapshot(pick);
+      return pick && { pick: $state.snapshot(pick), material };
     },
-    restore: (saved) => {
+    restore: async (saved) => {
+      let pick = saved?.pick;
+      // Saved on the material at the drag's start: re-matched only if it changed since (the picker
+      // and a Shift-drag can hardly be used at once, so this is rare).
+      if (pick && saved && !sameRgb(saved.material, material)) {
+        const gen = generation;
+        pick = (await rematch([pick], material))?.[0];
+        if (gen !== generation) pick = undefined;
+      }
       status = 'Move cancelled.';
-      if (!saved || !picks.some((p) => p.id === saved.id)) return;
-      picks = picks.map((p) => (p.id === saved.id ? saved : p));
+      const restored = pick;
+      if (!restored || !picks.some((p) => p.id === restored.id)) return;
+      picks = picks.map((p) => (p.id === restored.id ? restored : p));
       requestRecolor();
     },
     show: (marker) => (moving = marker),
@@ -188,7 +229,8 @@
     const gen = generation;
     const before = picks.find((p) => p.id === move.id);
     if (!before) return;
-    const picked = await client.call((api) => api.pick(gen, move.x, move.y, move.seen));
+    const on = material;
+    const picked = await client.call((api) => api.pick(gen, move.x, move.y, on, move.seen));
     if (gen !== generation) return;
     if (picked.status === 'error') {
       if (picked.error.kind !== 'superseded') error = picked.error.message;
@@ -227,6 +269,67 @@
     if (recolored) requestRecolor();
   }
 
+  // ── Material (material-color M1–M6, C1): the color the image is composited over ─────────────
+  // Live while the picker is open: inputs coalesce into the queued material change while it hasn't
+  // started and nothing else was queued after it (`Serial.coalescing`), so a burst is one change and
+  // never passes another action. Applying re-matches the picks on the new material (M3 a): a pick
+  // whose color changed gets the nearest ink again, the others keep theirs. Picks that now share a
+  // color are kept (M3.1 b).
+
+  const queueMaterial = mutations.coalescing(applyMaterial);
+
+  function setMaterial(color: Rgb) {
+    materialInput = hex(color);
+    queueMaterial({ color, input: ++materialInputs });
+  }
+
+  /** Applies material input number `input` (runs inside `mutations`). */
+  async function applyMaterial({ color: next, input }: { color: Rgb; input: number }) {
+    if (sameRgb(next, material)) return;
+    const gen = generation;
+    const rematched = await rematch(picks, next);
+    if (!rematched) {
+      // Not applied: the input goes back to the applied material, unless it shows a newer choice.
+      if (input === materialInputs) materialInput = hex(material);
+      return;
+    }
+    // A new image opened meanwhile has no picks yet (its picks queue behind this task).
+    let resuggested = 0;
+    if (gen === generation) {
+      resuggested = rematched.filter((p, i) => !sameRgb(p.matching, picks[i]!.matching)).length;
+      picks = rematched;
+    }
+    material = next;
+    status = `Material ${hex(next)}${resuggested ? ` · ${resuggested} pick${resuggested === 1 ? '' : 's'} re-suggested` : ''}.`;
+    requestRecolor();
+    if (image) void countColors();
+  }
+
+  /**
+   * The picks re-matched on `on` (M3 a), in order: a pick whose composited color changed gets the
+   * nearest ink and alternatives, as a fresh click would; the others are returned unchanged.
+   * `undefined` if the engine call failed (the error is shown).
+   */
+  async function rematch(list: PickEntry[], on: Rgb): Promise<PickEntry[] | undefined> {
+    if (list.length === 0) return [];
+    const plain = $state.snapshot(list);
+    const outcome = await client.call((api) =>
+      api.rematch(
+        plain.map((p) => ({ pixel: p.pixel, matching: p.matching })),
+        on,
+      ),
+    );
+    if (outcome.status === 'error') {
+      if (outcome.error.kind !== 'superseded') error = outcome.error.message;
+      return undefined;
+    }
+    return list.map((p, i) => {
+      const r = outcome.value[i];
+      const ink = r?.alternatives?.[0];
+      return r && ink ? { ...p, matching: r.matching, ink, alternatives: r.alternatives! } : p;
+    });
+  }
+
   /** Queues a synchronous pick-list change behind any pending one. */
   function mutate(change: () => void) {
     const gen = generation;
@@ -259,6 +362,7 @@
   let sizeDialog: HTMLDialogElement;
   let configSections = $state<ConfigSection[]>([]);
   let configName = $state('');
+  let configMaterial: Rgb = WHITE;
 
   function onconfigchosen(e: Event & { currentTarget: HTMLInputElement }) {
     const f = e.currentTarget.files?.[0];
@@ -269,6 +373,7 @@
       return;
     }
     const gen = generation;
+    const inputs = materialInputs;
     // Queued like a pick, so imports and picks apply in the order they were made.
     void mutations.run(async () => {
       const parsed = await client.call(async (api) => api.parseConfig(await f.text()));
@@ -277,15 +382,16 @@
         error = `${f.name}: ${parsed.error.message}`;
         return;
       }
-      const sections = parsed.value.sections;
+      const { sections, material: fileMaterial } = parsed.value;
       if (sections.length === 0) {
         error = `${f.name}: the config has no palettes.`;
       } else if (sections.length === 1) {
-        await applySection(sections[0]!, f.name, gen);
+        await applySection(sections[0]!, fileMaterial, f.name, gen, inputs);
       } else {
         // The choice in the dialog is the next action; it queues the import then.
         configSections = sections;
         configName = f.name;
+        configMaterial = fileMaterial;
         sizeDialog.showModal();
       }
     });
@@ -297,13 +403,25 @@
     // Svelte state is a proxy, which can't be posted to the worker: keep a plain copy.
     const plain = $state.snapshot(section);
     const name = configName;
-    void mutations.run(() => applySection(plain, name, gen));
+    const fileMaterial = configMaterial;
+    const inputs = materialInputs;
+    void mutations.run(() => applySection(plain, fileMaterial, name, gen, inputs));
   }
 
-  /** Resolves a section and replaces the picks in one step (runs inside `mutations`). */
-  async function applySection(section: ConfigSection, name: string, gen: number) {
+  /**
+   * Resolves a section on the config's material and replaces the picks and the material in one
+   * step (runs inside `mutations`). Duplicates in the file are kept, as written (C4 a). `inputs`:
+   * the material inputs made before the import was chosen.
+   */
+  async function applySection(
+    section: ConfigSection,
+    fileMaterial: Rgb,
+    name: string,
+    gen: number,
+    inputs: number,
+  ) {
     if (gen !== generation) return;
-    const resolved = await client.call((api) => api.resolveSection(section));
+    const resolved = await client.call((api) => api.resolveSection(section, fileMaterial));
     if (gen !== generation) return;
     if (resolved.status === 'error') {
       error = `${name}: ${resolved.error.message}`;
@@ -316,16 +434,23 @@
       ink: p.ink,
       alternatives: p.alternatives,
     }));
-    status = `Imported ${picks.length} pick${picks.length === 1 ? '' : 's'} (size ${section.size}) from ${name}.`;
+    const materialChanged = !sameRgb(fileMaterial, material);
+    material = fileMaterial;
+    // A material chosen after the import is queued behind it and already shown.
+    if (inputs === materialInputs) materialInput = hex(fileMaterial);
+    status = `Imported ${picks.length} pick${picks.length === 1 ? '' : 's'} (size ${section.size}) from ${name}${materialChanged ? `, on material ${hex(fileMaterial)}` : ''}.`;
     requestRecolor();
+    if (materialChanged) void countColors();
   }
 
   async function exportPicks() {
     if (!file) return;
     const name = file.name;
+    const on = material;
     const exported = await client.call((api) =>
       api.exportConfig(
         name,
+        on,
         picks.map((p) => ({ rgba: $state.snapshot(p.pixel), ink: p.ink.name })),
       ),
     );
@@ -341,12 +466,14 @@
     generation: number;
     revision: number;
     mappings: ReturnType<typeof mappings>;
+    /** The material these mappings were made on: a result never mixes two materials (C2 a). */
+    material: Rgb;
   }
 
   const recolorer = new Latest<RecolorRequest>(async (req) => {
     recoloring = true;
     const outcome = await client.call((api) =>
-      api.recolor(req.generation, req.revision, req.mappings),
+      api.recolor(req.generation, req.revision, req.mappings, req.material),
     );
     const current = req.generation === generation && req.revision === revision;
     recoloring = recolorer.busy && !current;
@@ -370,7 +497,12 @@
   function requestRecolor() {
     if (!image) return;
     revision++;
-    recolorer.request({ generation, revision, mappings: $state.snapshot(mappings(picks)) });
+    recolorer.request({
+      generation,
+      revision,
+      mappings: $state.snapshot(mappings(picks)),
+      material,
+    });
   }
 
   // ── Download (W9 a): always the current revision at full resolution ───────────────────────────
@@ -462,6 +594,11 @@
     ['r', '#70369d'],
   ];
 
+  /** How labels name the material. */
+  const onMaterial = $derived(
+    sameRgb(material, WHITE) ? 'white' : `the material (${hex(material)})`,
+  );
+
   const megabytes = (n: number) =>
     n < 1024 * 1024 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
 </script>
@@ -488,7 +625,7 @@
 </header>
 
 <main class:dragging>
-  <section class="toolbar" aria-label="Image and zoom">
+  <section class="toolbar" aria-label="Image, material and zoom">
     <input
       bind:this={fileInput}
       id="file"
@@ -512,6 +649,22 @@
       {/if}
     </span>
     <span class="spacer"></span>
+    <div class="material" role="group" aria-label="Material">
+      <label title="The garment or surface color the image is printed on">
+        Material
+        <input
+          type="color"
+          value={materialInput}
+          oninput={(e) => setMaterial(fromHex(e.currentTarget.value))}
+          data-testid="material"
+        />
+      </label>
+      <button
+        type="button"
+        onclick={() => setMaterial(WHITE)}
+        disabled={materialInput === hex(WHITE)}>White</button
+      >
+    </div>
     <div class="zoom" role="group" aria-label="Zoom">
       <button type="button" onclick={() => zoomBy(1 / 1.5)} disabled={!image} aria-label="Zoom out"
         >−</button
@@ -547,12 +700,13 @@
       onpick={pickAt}
       onmove={(move) => mover.update(move)}
       onmovecancel={(drag) => mover.cancel(drag)}
+      backdrop={css(material)}
     />
     <ImageView
       label={!image
         ? 'Preview'
         : picks.length === 0
-          ? 'No picks yet: the image as printed on white'
+          ? `No picks yet: the image as printed on ${onMaterial}`
           : `Printed with ${picks.length} ink${picks.length === 1 ? '' : 's'}${recoloring ? ' · updating…' : ''}`}
       bitmap={result}
       {view}
@@ -605,7 +759,7 @@
         <button type="button" class="link" onclick={clearPicks}>Clear all</button>
       {/if}
     </div>
-    <PickList {picks} onink={changeInk} onremove={removePick} />
+    <PickList {picks} {material} onink={changeInk} onremove={removePick} />
   </section>
 </main>
 
@@ -653,6 +807,25 @@
     display: flex;
     align-items: center;
     gap: 0.25rem;
+  }
+  .material,
+  .material label {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .material label {
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  .material input {
+    width: 2.2rem;
+    height: 1.8rem;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: none;
+    cursor: pointer;
   }
   .zoom output {
     min-width: 4.5ch;

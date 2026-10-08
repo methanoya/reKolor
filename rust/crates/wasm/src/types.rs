@@ -29,6 +29,9 @@ pub struct Mapping {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Tsify)]
 pub struct RecolorRequest {
     pub mappings: Vec<Mapping>,
+    /// The material color the image is composited over (the garment or substrate). Required: white
+    /// reproduces the behavior from before the material.
+    pub material: Rgb,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Tsify)]
@@ -44,10 +47,17 @@ pub struct RecolorStats {
 pub struct ImageStats {
     pub width: u32,
     pub height: u32,
-    /// Distinct colors after compositing over white: what `recolor` matches.
+    /// Distinct colors after compositing over the material: what `recolor` matches.
     pub colors: f64,
     /// Distinct RGBA values.
     pub rgba_colors: f64,
+}
+
+/// The number of distinct colors after compositing over the material (`SourceImage.colorCount`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Tsify)]
+pub struct ColorCount {
+    /// At most 2^24, exact as a JS number.
+    pub colors: f64,
 }
 
 /// One palette color as passed in, e.g. from `palettes/pantone.json`.
@@ -94,7 +104,7 @@ pub struct ColorMismatch {
 pub struct Pick {
     /// The stored pixel.
     pub pixel: Rgba,
-    /// The color used for matching (the pixel composited over white).
+    /// The color used for matching (the pixel composited over the material).
     pub matching: Rgb,
     /// The suggested palette entry.
     pub suggestion: PaletteMatch,

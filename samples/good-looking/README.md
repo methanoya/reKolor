@@ -25,10 +25,10 @@ PNG and have been resized to keep interactive processing practical.
 - For a **black or navy shirt**, start with the tiger, astronaut, sunset,
   jellyfish, or Starry Night. In production, the garment can replace the
   darkest ink, leaving room for another accent color.
-- The tiger PNG has transparency, but the current reKolor implementation
-  composites transparent pixels against white and outputs an opaque PNG. Plan
-  to remove the white background again before producing screens, or first place
-  the tiger on a background matching the intended shirt.
+- The tiger PNG has transparency. reKolor composites transparent pixels
+  against the material color (white by default; set it to the shirt's color)
+  and outputs an opaque PNG, so the background is inked too: remove it again
+  before producing screens.
 - Treat six colors as six broad tonal roles, not six tiny sampled details:
   deepest shadow, dark midtone, light midtone, highlight, warm accent, and cool
   accent. Pick colors from large important regions of the subject.

@@ -2,6 +2,8 @@
 //! app (import/export through `rekolor-wasm`), so both read and validate files the same way.
 //!
 //! ```toml
+//! material = [255, 255, 255]
+//!
 //! [[palette]]
 //! size = 3
 //! picks = [
@@ -9,15 +11,17 @@
 //! ]
 //! ```
 //!
-//! Each pick is a pixel color (straight-alpha RGBA, as stored in the image) and the palette entry it
-//! maps to, by name. "Size" is the requested number of distinct inks; a palette may list fewer
-//! picks ("up to N"), and several picks may share one ink.
+//! `material` is the color the picks are composited over (the garment or substrate): read as white
+//! when absent, always written (material-color decisions M4 b, M4.1 a). It applies to every
+//! section. Each pick is a pixel color (straight-alpha RGBA, as stored in the image) and the
+//! palette entry it maps to, by name. "Size" is the requested number of distinct inks; a palette
+//! may list fewer picks ("up to N"), and several picks may share one ink.
 //!
 //! No file I/O and no dependency on `rekolor-io` or `wasm-bindgen`: callers read and write the text.
 
 use std::collections::HashSet;
 
-use rekolor_core::{Mapping, Palette, Rgb8, Rgba8, composite_over_white};
+use rekolor_core::{Mapping, Palette, Rgb8, Rgba8, composite};
 use serde::Deserialize;
 
 /// Largest accepted config text (owner decision WA1 a).
@@ -30,7 +34,14 @@ pub const MAX_PICKS: usize = 256;
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PaletteConfig {
+    /// The material color, `[r, g, b]`; white when the file has no `material` line.
+    #[serde(default = "white")]
+    pub material: [u8; 3],
     pub palette: Vec<SizedPalette>,
+}
+
+fn white() -> [u8; 3] {
+    [255, 255, 255]
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -52,7 +63,7 @@ pub struct ConfigPick {
 pub struct ResolvedPick {
     /// The stored pixel color from the config.
     pub rgba: Rgba8,
-    /// The color the matcher sees: `rgba` composited over white (like an interactive pick).
+    /// The color the matcher sees: `rgba` composited over the material (like an interactive pick).
     pub matching: Rgb8,
     /// The ink's position in the palette.
     pub index: usize,
@@ -115,10 +126,12 @@ impl PaletteConfig {
             .ok_or(ConfigError::MissingSize(size))
     }
 
-    /// Writes the config in the simple format: each header line as a `# ` comment, then the
-    /// sections in order.
+    /// Writes the config in the simple format: each header line as a `# ` comment, the material
+    /// (white too), then the sections in order.
     pub fn to_toml(&self, header: &[&str]) -> String {
         let mut out: String = header.iter().map(|line| format!("# {line}\n")).collect();
+        let [r, g, b] = self.material;
+        out.push_str(&format!("\nmaterial = [{r}, {g}, {b}]\n"));
         for palette in &self.palette {
             out.push_str(&format!(
                 "\n[[palette]]\nsize = {}\npicks = [\n",
@@ -176,8 +189,12 @@ impl SizedPalette {
     }
 
     /// Looks up every ink in `palette` (an unknown name is an error, nothing is skipped) and
-    /// composites each pick over white, in pick order.
-    pub fn resolve(&self, palette: &Palette) -> Result<Vec<ResolvedPick>, ConfigError> {
+    /// composites each pick over `material` (the config's, or an override), in pick order.
+    pub fn resolve(
+        &self,
+        palette: &Palette,
+        material: Rgb8,
+    ) -> Result<Vec<ResolvedPick>, ConfigError> {
         self.picks
             .iter()
             .map(|pick| {
@@ -189,17 +206,17 @@ impl SizedPalette {
                 let rgba = Rgba8::from(pick.rgba);
                 Ok(ResolvedPick {
                     rgba,
-                    matching: composite_over_white(rgba),
+                    matching: composite(rgba, material),
                     index,
                 })
             })
             .collect()
     }
 
-    /// The mappings for recoloring: each pick's matching color → its ink's color.
-    pub fn mappings(&self, palette: &Palette) -> Result<Vec<Mapping>, ConfigError> {
+    /// The mappings for recoloring on `material`: each pick's matching color → its ink's color.
+    pub fn mappings(&self, palette: &Palette, material: Rgb8) -> Result<Vec<Mapping>, ConfigError> {
         Ok(self
-            .resolve(palette)?
+            .resolve(palette, material)?
             .into_iter()
             .map(|p| Mapping {
                 source: p.matching,
@@ -216,6 +233,7 @@ mod tests {
 
     fn sample() -> PaletteConfig {
         PaletteConfig {
+            material: [20, 20, 22],
             palette: vec![
                 SizedPalette {
                     size: 3,
@@ -249,7 +267,9 @@ mod tests {
     #[test]
     fn writes_the_simple_format_and_reads_it_back() {
         let text = sample().to_toml(&["Header line one.", "Two."]);
-        assert!(text.starts_with("# Header line one.\n# Two.\n\n[[palette]]\nsize = 3\n"));
+        assert!(text.starts_with(
+            "# Header line one.\n# Two.\n\nmaterial = [20, 20, 22]\n\n[[palette]]\nsize = 3\n"
+        ));
         assert!(text.contains("  { rgba = [210, 120, 40, 255], ink = \"Pantone 1595\" },\n"));
         assert_eq!(PaletteConfig::parse(&text).unwrap(), sample());
     }
@@ -327,17 +347,53 @@ mod tests {
     }
 
     #[test]
-    fn resolve_composites_over_white_and_finds_the_ink() {
-        let resolved = sample().size(3).unwrap().resolve(&palette()).unwrap();
+    fn the_material_is_white_when_absent_and_always_written() {
+        let config = PaletteConfig::parse("[[palette]]\nsize = 3\npicks = []\n").unwrap();
+        assert_eq!(config.material, [255, 255, 255]);
+        let text = config.to_toml(&[]);
+        assert_eq!(
+            text,
+            "\nmaterial = [255, 255, 255]\n\n[[palette]]\nsize = 3\npicks = [\n]\n"
+        );
+        assert_eq!(PaletteConfig::parse(&text).unwrap(), config);
+    }
+
+    #[test]
+    fn rejects_a_malformed_material() {
+        for text in [
+            "material = [1, 2]\n",
+            "material = [1, 2, 3, 4]\n",
+            "material = [256, 0, 0]\n",
+            "material = [-1, 0, 0]\n",
+            "material = \"white\"\n",
+            // After a table, the key belongs to that section, which has no such field.
+            "[[palette]]\nsize = 3\npicks = []\nmaterial = [0, 0, 0]\n",
+        ] {
+            assert!(
+                matches!(PaletteConfig::parse(text), Err(ConfigError::Syntax(_))),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_composites_over_the_material_and_finds_the_ink() {
+        let config = sample();
+        let sized = config.size(3).unwrap();
+        let resolved = sized.resolve(&palette(), Rgb8::WHITE).unwrap();
         assert_eq!(resolved[0].matching, Rgb8::new(210, 120, 40));
         assert_eq!(resolved[0].index, 1);
-        // A transparent pick is matched as white, like an interactive pick.
+        // A transparent pick is matched as the material, like an interactive pick.
         assert_eq!(resolved[1].matching, Rgb8::new(255, 255, 255));
         assert_eq!(resolved[1].rgba, Rgba8::new(0, 0, 0, 0));
+        let resolved = sized.resolve(&palette(), config.material.into()).unwrap();
+        assert_eq!(resolved[0].matching, Rgb8::new(210, 120, 40));
+        assert_eq!(resolved[1].matching, Rgb8::new(20, 20, 22));
 
-        let mappings = sample().size(3).unwrap().mappings(&palette()).unwrap();
+        let mappings = sized.mappings(&palette(), config.material.into()).unwrap();
         assert_eq!(mappings[0].source, Rgb8::new(210, 120, 40));
         assert_eq!(mappings[0].ink, Rgb8::new(209, 91, 5));
+        assert_eq!(mappings[1].source, Rgb8::new(20, 20, 22));
     }
 
     #[test]
@@ -350,7 +406,7 @@ mod tests {
             }],
         };
         assert_eq!(
-            unknown.resolve(&palette()),
+            unknown.resolve(&palette(), Rgb8::WHITE),
             Err(ConfigError::UnknownInk("Nope".into()))
         );
         assert_eq!(sample().size(16), Err(ConfigError::MissingSize(16)));

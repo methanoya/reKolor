@@ -1,5 +1,5 @@
 use crate::color::{Lab, delta_e_2000_lab, lab};
-use crate::{Error, ImageRef, Rgb8, composite_over_white};
+use crate::{Error, ImageRef, Rgb8, composite};
 
 /// One picked color and the ink that replaces it (`from` → `to` in the 2023 UI).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,11 +18,12 @@ pub struct RecolorStats {
 
 /// Recolors `image` into `out`, which must have the same length as the source buffer.
 ///
-/// Contract (behavior decisions I1, I2, I8, I9: all kept from the existing implementation):
-/// 1. each pixel is composited over white ([`composite_over_white`]); the output is opaque;
+/// Contract (behavior decisions I1, I2, I8, I9: all kept from the existing implementation, with
+/// the material color in place of white; [`Rgb8::WHITE`] reproduces the behavior from before it):
+/// 1. each pixel is composited over `material` ([`composite`]); the output is opaque;
 /// 2. if the result equals a mapping's `source`, it takes that mapping's ink (first match wins);
 /// 3. otherwise it takes the **ink** nearest to it by CIEDE2000 (on a tie, the earlier mapping);
-/// 4. **no mappings**: the output is the composited copy (the image as it looks on white);
+/// 4. **no mappings**: the output is the composited copy (the image as it looks on the material);
 /// 5. **one mapping**: no special case, so every pixel takes that ink.
 ///
 /// ΔE is bit-identical on native and WASM builds ([`delta_e_2000_lab`](crate::delta_e_2000_lab)),
@@ -30,6 +31,7 @@ pub struct RecolorStats {
 pub fn recolor(
     image: ImageRef<'_>,
     mappings: &[Mapping],
+    material: Rgb8,
     out: &mut [u8],
 ) -> Result<RecolorStats, Error> {
     let input = image.as_bytes();
@@ -47,7 +49,7 @@ pub fn recolor(
             .then(|| vec![0u16; 1 << 24]);
     let mut stats = RecolorStats::default();
     for (pixel, dst) in image.pixels().zip(out.as_chunks_mut::<4>().0) {
-        let color = composite_over_white(pixel);
+        let color = composite(pixel, material);
         let (ink, exact) = match memo.as_deref_mut() {
             Some(memo) => memoized(memo, &inks, color),
             None => lookup(&inks, color),
@@ -60,9 +62,10 @@ pub fn recolor(
         }
     }
     log::debug!(
-        "recolor: {}×{}, {} mappings, exact {}, nearest {}",
+        "recolor: {}×{} on {:?}, {} mappings, exact {}, nearest {}",
         image.width(),
         image.height(),
+        material,
         mappings.len(),
         stats.exact,
         stats.nearest
@@ -131,10 +134,16 @@ mod tests {
     const RED: Rgb8 = Rgb8::new(230, 76, 60);
     const BLUE: Rgb8 = Rgb8::new(40, 120, 200);
 
+    const BLACK: Rgb8 = Rgb8::new(0, 0, 0);
+
     fn run(rgba: &[u8], mappings: &[Mapping]) -> (Vec<u8>, RecolorStats) {
+        run_on(rgba, mappings, Rgb8::WHITE)
+    }
+
+    fn run_on(rgba: &[u8], mappings: &[Mapping], material: Rgb8) -> (Vec<u8>, RecolorStats) {
         let image = ImageRef::new(rgba, (rgba.len() / 4) as u32, 1).unwrap();
         let mut out = vec![0; rgba.len()];
-        let stats = recolor(image, mappings, &mut out).unwrap();
+        let stats = recolor(image, mappings, material, &mut out).unwrap();
         (out, stats)
     }
 
@@ -142,7 +151,7 @@ mod tests {
     fn rejects_output_of_wrong_length() {
         let image = ImageRef::new(&[0; 8], 2, 1).unwrap();
         assert_eq!(
-            recolor(image, &[], &mut [0; 4]).unwrap_err(),
+            recolor(image, &[], Rgb8::WHITE, &mut [0; 4]).unwrap_err(),
             Error::OutputLength {
                 expected: 8,
                 actual: 4
@@ -281,18 +290,24 @@ mod tests {
             },
         ];
         assert!((w * h) as usize > MEMO_MIN_PIXELS);
-        let mut out = vec![0; rgba.len()];
-        let stats = recolor(image, &mappings, &mut out).unwrap();
-
         let inks: Vec<(Mapping, Lab)> = mappings.iter().map(|&m| (m, lab(m.ink))).collect();
-        let mut exact = 0;
-        for (pixel, got) in image.pixels().zip(out.as_chunks::<4>().0) {
-            let (ink, is_exact) = lookup(&inks, composite_over_white(pixel));
-            assert_eq!(*got, [ink.r, ink.g, ink.b, 255], "pixel {pixel:?}");
-            exact += u64::from(is_exact);
+        // On (7, 8, 9), transparent pixels are an exact source too.
+        for material in [Rgb8::WHITE, Rgb8::new(7, 8, 9)] {
+            let mut out = vec![0; rgba.len()];
+            let stats = recolor(image, &mappings, material, &mut out).unwrap();
+            let mut exact = 0;
+            for (pixel, got) in image.pixels().zip(out.as_chunks::<4>().0) {
+                let (ink, is_exact) = lookup(&inks, composite(pixel, material));
+                assert_eq!(
+                    *got,
+                    [ink.r, ink.g, ink.b, 255],
+                    "pixel {pixel:?} on {material:?}"
+                );
+                exact += u64::from(is_exact);
+            }
+            assert_eq!(stats.exact, exact);
+            assert_eq!(stats.exact + stats.nearest, u64::from(w * h));
         }
-        assert_eq!(stats.exact, exact);
-        assert_eq!(stats.exact + stats.nearest, u64::from(w * h));
     }
 
     #[test]
@@ -310,9 +325,62 @@ mod tests {
     }
 
     #[test]
+    fn pixels_are_composited_over_the_material_before_matching() {
+        let mappings = [
+            Mapping {
+                source: RED,
+                ink: Rgb8::WHITE,
+            },
+            Mapping {
+                source: BLUE,
+                ink: BLACK,
+            },
+        ];
+        // Transparent: on white it takes the white ink, on black the black one.
+        let transparent = [9, 9, 9, 0];
+        assert_eq!(run(&transparent, &mappings).0, [255, 255, 255, 255]);
+        let (out, stats) = run_on(&transparent, &mappings, BLACK);
+        assert_eq!(out, [0, 0, 0, 255]);
+        assert_eq!((stats.exact, stats.nearest), (0, 1));
+
+        // An exact source match is checked after compositing over the material.
+        let on_black = [Mapping {
+            source: BLACK,
+            ink: Rgb8::new(1, 2, 3),
+        }];
+        let (out, stats) = run_on(&transparent, &on_black, BLACK);
+        assert_eq!(out, [1, 2, 3, 255]);
+        assert_eq!(stats.exact, 1);
+    }
+
+    #[test]
+    fn opaque_pixels_do_not_depend_on_the_material() {
+        let mappings = [
+            Mapping {
+                source: RED,
+                ink: BLUE,
+            },
+            Mapping {
+                source: Rgb8::new(250, 250, 250),
+                ink: BLACK,
+            },
+        ];
+        let rgba = [230, 76, 60, 255, 1, 2, 3, 255, 250, 250, 250, 255];
+        let on_white = run(&rgba, &mappings);
+        for material in [BLACK, Rgb8::new(128, 128, 128), Rgb8::new(20, 140, 230)] {
+            assert_eq!(run_on(&rgba, &mappings, material), on_white, "{material:?}");
+        }
+    }
+
+    #[test]
     fn no_mappings_passes_composited_pixels_through() {
         let (out, stats) = run(&[10, 20, 30, 0, 10, 20, 30, 255], &[]);
         assert_eq!(out, [255, 255, 255, 255, 10, 20, 30, 255]);
         assert_eq!((stats.exact, stats.nearest), (0, 2));
+
+        // On a material: transparent → the material, translucent → mixed toward it (I8 c).
+        let rgba = [10, 20, 30, 0, 10, 20, 30, 255, 203, 0, 0, 100];
+        let (out, _) = run_on(&rgba, &[], BLACK);
+        assert_eq!(out, [0, 0, 0, 255, 10, 20, 30, 255, 79, 0, 0, 255]);
     }
 }

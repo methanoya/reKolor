@@ -24,6 +24,7 @@ import type {
 import type { Decoded } from './codec';
 import type { Engine, ImageSize } from './engine';
 import { err, ok, type AppOutcome } from './outcome';
+import { sameRgb } from './picks';
 
 export interface Codec {
   decode(file: Blob): Promise<AppOutcome<Decoded>>;
@@ -42,6 +43,17 @@ export interface Recolored {
   revision: number;
   /** The recolored image, for display. */
   bitmap: ImageBitmap;
+}
+
+/** A pick re-matched on a new material (`Session.rematch`). */
+export interface Rematched {
+  /** The pixel composited over the new material. */
+  matching: Rgb;
+  /**
+   * Only when `matching` changed: the nearest inks, nearest first (the first is the suggestion, as
+   * for a click). Absent: the pick keeps its ink and alternatives (M3 a).
+   */
+  alternatives?: PaletteMatch[];
 }
 
 const superseded = <T>(): AppOutcome<T> =>
@@ -82,12 +94,32 @@ export class Session {
     return ok({ generation, width, height, bitmap });
   }
 
-  colorCount(generation: number): AppOutcome<number> {
-    return generation === this.#current ? this.#engine.colorCount() : superseded();
+  colorCount(generation: number, material: Rgb): AppOutcome<number> {
+    return generation === this.#current ? this.#engine.colorCount(material) : superseded();
   }
 
-  pick(generation: number, x: number, y: number, seen?: Rgba): AppOutcome<Pick> {
-    return generation === this.#current ? this.#engine.pick(x, y, seen) : superseded();
+  pick(generation: number, x: number, y: number, material: Rgb, seen?: Rgba): AppOutcome<Pick> {
+    return generation === this.#current ? this.#engine.pick(x, y, material, seen) : superseded();
+  }
+
+  /**
+   * Re-matches picks on a new material (M3 a), in order: each pick's pixel composited over it and,
+   * where that color differs from the pick's current `matching`, the nearest inks.
+   */
+  rematch(picks: { pixel: Rgba; matching: Rgb }[], material: Rgb): AppOutcome<Rematched[]> {
+    const rematched: Rematched[] = [];
+    for (const pick of picks) {
+      const matching = this.#engine.composite(pick.pixel, material);
+      if (matching.status === 'error') return matching;
+      if (sameRgb(matching.value, pick.matching)) {
+        rematched.push({ matching: matching.value });
+        continue;
+      }
+      const alternatives = this.#engine.nearest(matching.value);
+      if (alternatives.status === 'error') return alternatives;
+      rematched.push({ matching: matching.value, alternatives: alternatives.value });
+    }
+    return ok(rematched);
   }
 
   nearest(color: Rgb, k?: number): AppOutcome<PaletteMatch[]> {
@@ -98,10 +130,11 @@ export class Session {
     generation: number,
     revision: number,
     mappings: Mapping[],
+    material: Rgb,
   ): Promise<AppOutcome<Recolored>> {
     const size = this.#engine.image;
     if (generation !== this.#current || !size) return superseded();
-    const result = this.#engine.recolor(mappings);
+    const result = this.#engine.recolor(mappings, material);
     if (result.status === 'error') return result;
     this.#output = { generation, revision, rgba: result.value };
     const bitmap = await this.#codec.toBitmap(result.value, size.width, size.height);
@@ -125,13 +158,14 @@ export class Session {
   }
 
   /**
-   * Resolves a config section, with the ink alternatives for each pick (the nearest ones, plus the
-   * config's own ink if it isn't among them).
+   * Resolves a config section on the material (the config's), with the ink alternatives for each
+   * pick (the nearest ones, plus the config's own ink if it isn't among them).
    */
   resolveSection(
     section: ConfigSection,
+    material: Rgb,
   ): AppOutcome<(ResolvedPick & { alternatives: PaletteMatch[] })[]> {
-    const resolved = this.#engine.resolveSection(section);
+    const resolved = this.#engine.resolveSection(section, material);
     if (resolved.status === 'error') return resolved;
     return ok(
       resolved.value.map((pick) => {
@@ -143,7 +177,7 @@ export class Session {
     );
   }
 
-  exportConfig(imageName: string, picks: ConfigPick[]): AppOutcome<string> {
-    return this.#engine.exportConfig(imageName, picks);
+  exportConfig(imageName: string, material: Rgb, picks: ConfigPick[]): AppOutcome<string> {
+    return this.#engine.exportConfig(imageName, material, picks);
   }
 }

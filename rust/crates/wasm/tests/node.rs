@@ -12,10 +12,10 @@ mod generator;
 
 use rekolor_core::Rgb8;
 use rekolor_wasm::{
-    ConfigExport, ConfigPick, ConfigSection, ConfigText, ErrorKind, ImageStats, Mapping, Outcome,
-    Palette, PaletteData, PaletteEntry, PaletteMatch, PaletteMatches, ParsedConfig, Pick,
-    RecolorRequest, RecolorStats, ResolvedPicks, Rgb, Rgba, SourceImage, parse_config,
-    serialize_config,
+    ColorCount, ConfigExport, ConfigPick, ConfigSection, ConfigText, ErrorKind, ImageStats,
+    Mapping, Outcome, Palette, PaletteData, PaletteEntry, PaletteMatch, PaletteMatches,
+    ParsedConfig, Pick, RecolorRequest, RecolorStats, ResolvedPicks, Rgb, Rgba, SourceImage,
+    composite, parse_config, serialize_config,
 };
 use serde::de::DeserializeOwned;
 use tsify::{Ts, Tsify};
@@ -84,6 +84,21 @@ fn rgb([r, g, b]: [u8; 3]) -> Rgb {
     Rgb { r, g, b }
 }
 
+const WHITE: Rgb = Rgb {
+    r: 255,
+    g: 255,
+    b: 255,
+};
+
+/// A material argument.
+fn material(c: Rgb) -> Ts<Rgb> {
+    Ts::from_rust(&c).unwrap()
+}
+
+fn white() -> Ts<Rgb> {
+    material(WHITE)
+}
+
 fn request(set: &str) -> Ts<RecolorRequest> {
     let mappings = generator::mapping_set(set)
         .pairs
@@ -93,7 +108,11 @@ fn request(set: &str) -> Ts<RecolorRequest> {
             ink: rgb(ink),
         })
         .collect();
-    Ts::from_rust(&RecolorRequest { mappings }).unwrap()
+    Ts::from_rust(&RecolorRequest {
+        material: WHITE,
+        mappings,
+    })
+    .unwrap()
 }
 
 fn small_palette() -> Palette {
@@ -153,7 +172,7 @@ fn analyze_reproduces_image_info_in_wasm() {
         let fixture = generator::fixture(cols[0]);
         let image =
             SourceImage::from_rgba(fixture.rgba.clone(), fixture.width, fixture.height).unwrap();
-        let stats: ImageStats = image.analyze().to_rust().unwrap();
+        let stats: ImageStats = ok(read(image.analyze(white())));
         let expected: Vec<f64> = cols[1..].iter().map(|v| v.parse().unwrap()).collect();
         assert_eq!(
             vec![
@@ -246,7 +265,7 @@ fn pick_reads_the_source_pixel_and_warns_on_mismatch() {
     // Two pixels: transparent, then opaque red.
     let image = SourceImage::from_rgba(vec![0, 0, 0, 0, 230, 76, 60, 255], 2, 1).unwrap();
 
-    let p: Pick = ok(read(image.pick(1.0, 0.0, None, &palette)));
+    let p: Pick = ok(read(image.pick(1.0, 0.0, None, white(), &palette)));
     assert_eq!(
         p.pixel,
         Rgba {
@@ -262,7 +281,7 @@ fn pick_reads_the_source_pixel_and_warns_on_mismatch() {
     assert_eq!(p.mismatch, None);
 
     // Transparent is matched as white.
-    let p: Pick = ok(read(image.pick(0.0, 0.0, None, &palette)));
+    let p: Pick = ok(read(image.pick(0.0, 0.0, None, white(), &palette)));
     assert_eq!(p.matching, rgb([255, 255, 255]));
     assert!(p.suggestion.non_palette);
 
@@ -274,7 +293,7 @@ fn pick_reads_the_source_pixel_and_warns_on_mismatch() {
         a: 255,
     })
     .unwrap();
-    let p: Pick = ok(read(image.pick(1.0, 0.0, Some(seen), &palette)));
+    let p: Pick = ok(read(image.pick(1.0, 0.0, Some(seen), white(), &palette)));
     let mismatch = p.mismatch.expect("mismatch warning");
     assert_eq!(mismatch.max_channel_difference, 100);
     assert_eq!(
@@ -295,14 +314,14 @@ fn pick_reads_the_source_pixel_and_warns_on_mismatch() {
         a: 255,
     })
     .unwrap();
-    let p: Pick = ok(read(image.pick(1.0, 0.0, Some(close), &palette)));
+    let p: Pick = ok(read(image.pick(1.0, 0.0, Some(close), white(), &palette)));
     assert_eq!(p.mismatch, None);
 
-    let outcome: Outcome<Pick> = read(image.pick(2.0, 0.0, None, &palette));
+    let outcome: Outcome<Pick> = read(image.pick(2.0, 0.0, None, white(), &palette));
     assert_eq!(error_kind(outcome), ErrorKind::OutOfBounds);
 
     let bad_seen = Ts::new_unchecked(JsValue::from_str("red"));
-    let outcome: Outcome<Pick> = read(image.pick(1.0, 0.0, Some(bad_seen), &palette));
+    let outcome: Outcome<Pick> = read(image.pick(1.0, 0.0, Some(bad_seen), white(), &palette));
     assert_eq!(error_kind(outcome), ErrorKind::InvalidInput);
 }
 
@@ -354,7 +373,7 @@ fn numbers_must_be_whole_finite_and_in_u32_range() {
         (0.5, 0.0),
         (0.0, -1.0),
     ] {
-        let outcome: Outcome<Pick> = read(image.pick(x, y, None, &palette));
+        let outcome: Outcome<Pick> = read(image.pick(x, y, None, white(), &palette));
         assert_eq!(
             error_kind(outcome),
             ErrorKind::InvalidInput,
@@ -372,7 +391,7 @@ fn numbers_must_be_whole_finite_and_in_u32_range() {
     }
 
     // Valid calls on the same objects still work; -0 counts as 0.
-    let p: Pick = ok(read(image.pick(-0.0, 0.0, None, &palette)));
+    let p: Pick = ok(read(image.pick(-0.0, 0.0, None, white(), &palette)));
     assert_eq!(
         p.pixel,
         Rgba {
@@ -392,12 +411,17 @@ fn zero_and_one_mapping_follow_the_contract() {
     let image = SourceImage::from_rgba(vec![230, 76, 60, 255, 9, 9, 9, 0], 2, 1).unwrap();
     let mut out = [0u8; 8];
 
-    let none = Ts::from_rust(&RecolorRequest { mappings: vec![] }).unwrap();
+    let none = Ts::from_rust(&RecolorRequest {
+        material: WHITE,
+        mappings: vec![],
+    })
+    .unwrap();
     let stats: RecolorStats = ok(read(image.recolor(none, &mut out)));
     assert_eq!(out, [230, 76, 60, 255, 255, 255, 255, 255]);
     assert_eq!((stats.exact, stats.nearest), (0.0, 2.0));
 
     let one = Ts::from_rust(&RecolorRequest {
+        material: WHITE,
         mappings: vec![Mapping {
             source: rgb([230, 76, 60]),
             ink: rgb([40, 120, 200]),
@@ -478,6 +502,7 @@ fn nearest_ink_ties_go_to_the_earlier_mapping() {
     let mut out = [0u8; 4];
     for (first, second, expected) in [(a, b, [0, 2, 227, 255]), (b, a, [0, 4, 0, 255])] {
         let request = Ts::from_rust(&RecolorRequest {
+            material: WHITE,
             mappings: vec![
                 Mapping {
                     source: rgb([230, 76, 60]),
@@ -537,7 +562,7 @@ fn sample_configs_parse_resolve_and_round_trip() {
         );
         for section in &parsed.sections {
             let resolved: ResolvedPicks = ok(read(
-                palette.resolve_section(Ts::from_rust(section).unwrap()),
+                palette.resolve_section(Ts::from_rust(section).unwrap(), material(parsed.material)),
             ));
             assert_eq!(resolved.picks.len(), section.picks.len());
             for (pick, r) in section.picks.iter().zip(&resolved.picks) {
@@ -547,6 +572,7 @@ fn sample_configs_parse_resolve_and_round_trip() {
             // Export (one section, size = number of picks) and read it back.
             let export = ConfigExport {
                 image_name: "x.png".into(),
+                material: parsed.material,
                 picks: section.picks.clone(),
             };
             let text: ConfigText = ok(read(serialize_config(Ts::from_rust(&export).unwrap())));
@@ -555,6 +581,7 @@ fn sample_configs_parse_resolve_and_round_trip() {
                     .starts_with("# Palette exported from the reKolor web app for x.png.")
             );
             let again: ParsedConfig = ok(read(parse_config(&text.text)));
+            assert_eq!(again.material, parsed.material);
             assert_eq!(
                 again.sections,
                 [ConfigSection {
@@ -593,7 +620,7 @@ fn resolved_picks_are_composited_in_rust() {
         ],
     };
     let resolved: ResolvedPicks = ok(read(
-        palette.resolve_section(Ts::from_rust(&section).unwrap()),
+        palette.resolve_section(Ts::from_rust(&section).unwrap(), white()),
     ));
     assert_eq!(resolved.picks[0].matching, rgb([255, 255, 255]));
     assert_eq!(resolved.picks[0].ink.delta_e, 0.0);
@@ -637,7 +664,7 @@ fn bad_configs_are_invalid_config_errors() {
     };
     assert_eq!(
         error_kind::<ResolvedPicks>(read(
-            palette.resolve_section(Ts::from_rust(&unknown).unwrap())
+            palette.resolve_section(Ts::from_rust(&unknown).unwrap(), white())
         )),
         ErrorKind::InvalidConfig
     );
@@ -648,8 +675,9 @@ fn color_count_matches_analyze_and_mappings_are_capped() {
     let fixture = generator::fixture("noise");
     let image =
         SourceImage::from_rgba(fixture.rgba.clone(), fixture.width, fixture.height).unwrap();
-    let stats: ImageStats = image.analyze().to_rust().unwrap();
-    assert_eq!(image.color_count(), stats.colors);
+    let stats: ImageStats = ok(read(image.analyze(white())));
+    let count: ColorCount = ok(read(image.color_count(white())));
+    assert_eq!(count.colors, stats.colors);
 
     let mut out = vec![0u8; fixture.rgba.len()];
     let mapping = |i: u32| Mapping {
@@ -657,16 +685,111 @@ fn color_count_matches_analyze_and_mappings_are_capped() {
         ink: rgb([0, 0, 0]),
     };
     let allowed = Ts::from_rust(&RecolorRequest {
+        material: WHITE,
         mappings: (0..256).map(mapping).collect(),
     })
     .unwrap();
     let _: RecolorStats = ok(read(image.recolor(allowed, &mut out)));
     let too_many = Ts::from_rust(&RecolorRequest {
+        material: WHITE,
         mappings: (0..257).map(mapping).collect(),
     })
     .unwrap();
     assert_eq!(
         error_kind::<RecolorStats>(read(image.recolor(too_many, &mut out))),
         ErrorKind::TooManyMappings
+    );
+}
+
+#[wasm_bindgen_test]
+fn every_call_composites_over_the_given_material() {
+    let black = rgb([0, 0, 0]);
+    let palette = pantone_palette();
+    // Transparent (hiding 9,9,9), opaque red, translucent red.
+    let image =
+        SourceImage::from_rgba(vec![9, 9, 9, 0, 230, 76, 60, 255, 203, 0, 0, 100], 3, 1).unwrap();
+
+    let p: Pick = ok(read(image.pick(0.0, 0.0, None, material(black), &palette)));
+    assert_eq!(p.matching, black);
+    assert_eq!(p.suggestion.name, "Pure Black (non-palette)");
+    let p: Pick = ok(read(image.pick(2.0, 0.0, None, material(black), &palette)));
+    assert_eq!(p.matching, rgb([79, 0, 0]));
+
+    // No mappings: the copy composited over the material (I8 c).
+    let mut out = [0u8; 12];
+    let none = Ts::from_rust(&RecolorRequest {
+        mappings: vec![],
+        material: black,
+    })
+    .unwrap();
+    let _: RecolorStats = ok(read(image.recolor(none, &mut out)));
+    assert_eq!(out, [0, 0, 0, 255, 230, 76, 60, 255, 79, 0, 0, 255]);
+
+    let on_black: ColorCount = ok(read(image.color_count(material(black))));
+    let on_white: ColorCount = ok(read(image.color_count(white())));
+    assert_eq!((on_black.colors, on_white.colors), (3.0, 3.0));
+    let stats: ImageStats = ok(read(image.analyze(material(black))));
+    assert_eq!(stats.colors, 3.0);
+
+    let pixel = |r, g, b, a| Ts::from_rust(&Rgba { r, g, b, a }).unwrap();
+    let c: Rgb = ok(read(composite(pixel(203, 0, 0, 100), material(black))));
+    assert_eq!(c, rgb([79, 0, 0]));
+    let c: Rgb = ok(read(composite(pixel(203, 0, 0, 100), white())));
+    assert_eq!(c, rgb([234, 155, 155]));
+
+    // Required and checked: a request without a material, or a malformed one, is an error value.
+    let missing = js_sys::JSON::parse(r#"{"mappings":[]}"#).unwrap();
+    assert_eq!(
+        error_kind::<RecolorStats>(read(image.recolor(Ts::new_unchecked(missing), &mut out))),
+        ErrorKind::InvalidInput
+    );
+    let bad = || Ts::new_unchecked(JsValue::from_str("white"));
+    assert_eq!(
+        error_kind::<Pick>(read(image.pick(0.0, 0.0, None, bad(), &palette))),
+        ErrorKind::InvalidInput
+    );
+    assert_eq!(
+        error_kind::<ColorCount>(read(image.color_count(bad()))),
+        ErrorKind::InvalidInput
+    );
+    assert_eq!(
+        error_kind::<Rgb>(read(composite(pixel(1, 2, 3, 4), bad()))),
+        ErrorKind::InvalidInput
+    );
+}
+
+#[wasm_bindgen_test]
+fn configs_carry_the_material() {
+    let palette = pantone_palette();
+    // Absent: white (M4.1 a).
+    let parsed: ParsedConfig = ok(read(parse_config("[[palette]]\nsize = 1\npicks = []\n")));
+    assert_eq!(parsed.material, WHITE);
+
+    let text = "material = [0, 0, 0]\n\n[[palette]]\nsize = 1\npicks = [\n\
+                { rgba = [9, 9, 9, 0], ink = \"Pure Black (non-palette)\" },\n]\n";
+    let parsed: ParsedConfig = ok(read(parse_config(text)));
+    assert_eq!(parsed.material, rgb([0, 0, 0]));
+    let resolved: ResolvedPicks = ok(read(palette.resolve_section(
+        Ts::from_rust(&parsed.sections[0]).unwrap(),
+        material(parsed.material),
+    )));
+    assert_eq!(resolved.picks[0].matching, rgb([0, 0, 0]));
+    assert_eq!(resolved.picks[0].ink.delta_e, 0.0);
+
+    // Always written (M4 b), white too.
+    for c in [rgb([0, 0, 0]), WHITE] {
+        let export = ConfigExport {
+            image_name: "x.png".into(),
+            material: c,
+            picks: parsed.sections[0].picks.clone(),
+        };
+        let out: ConfigText = ok(read(serialize_config(Ts::from_rust(&export).unwrap())));
+        let line = format!("\nmaterial = [{}, {}, {}]\n", c.r, c.g, c.b);
+        assert!(out.text.contains(&line), "{}", out.text);
+    }
+
+    assert_eq!(
+        error_kind::<ParsedConfig>(read(parse_config("material = [1, 2]\n"))),
+        ErrorKind::InvalidConfig
     );
 }

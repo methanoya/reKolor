@@ -6,6 +6,7 @@ import { beforeAll, describe, expect, test } from 'vitest';
 import {
   Palette,
   SourceImage,
+  composite,
   parseConfig,
   serializeConfig,
   type PaletteData,
@@ -16,6 +17,9 @@ import { loadWasm, unwrap } from './wasm';
 
 const RED: Rgb = { r: 230, g: 76, b: 60 };
 const PANTONE_285: Rgb = { r: 58, g: 117, b: 196 };
+/** The default material: compositing over it is the behavior from before the material color. */
+const WHITE: Rgb = { r: 255, g: 255, b: 255 };
+const BLACK: Rgb = { r: 0, g: 0, b: 0 };
 
 /** `palettes/pantone.json` converted the way the app will do it: `Object.entries` keeps file order. */
 async function pantoneData(): Promise<PaletteData> {
@@ -34,7 +38,10 @@ function redAndTransparent(): SourceImage {
   return unwrap(SourceImage.create(new Uint8Array([230, 76, 60, 255, 0, 0, 0, 0]), 2, 1));
 }
 
-const redToBlue: RecolorRequest = { mappings: [{ source: RED, ink: PANTONE_285 }] };
+const redToBlue: RecolorRequest = {
+  mappings: [{ source: RED, ink: PANTONE_285 }],
+  material: WHITE,
+};
 
 beforeAll(loadWasm);
 
@@ -73,8 +80,8 @@ describe('SourceImage', () => {
   test('create returns a typed outcome', () => {
     const image = redAndTransparent();
     expect([image.width, image.height]).toEqual([2, 1]);
-    // Pixel 2 is transparent, so it counts as white.
-    expect(image.analyze()).toEqual({ width: 2, height: 1, colors: 2, rgbaColors: 2 });
+    // Pixel 2 is transparent, so it counts as the material (white).
+    expect(unwrap(image.analyze(WHITE))).toEqual({ width: 2, height: 1, colors: 2, rgbaColors: 2 });
 
     const wrongLength = SourceImage.create(new Uint8Array(7), 2, 1);
     expect(wrongLength.status).toBe('error');
@@ -107,7 +114,10 @@ describe('SourceImage', () => {
     const image = redAndTransparent();
     const out = new Uint8Array(8);
 
-    expect(unwrap(image.recolor({ mappings: [] }, out))).toEqual({ exact: 0, nearest: 2 });
+    expect(unwrap(image.recolor({ mappings: [], material: WHITE }, out))).toEqual({
+      exact: 0,
+      nearest: 2,
+    });
     expect([...out]).toEqual([230, 76, 60, 255, 255, 255, 255, 255]);
 
     expect(unwrap(image.recolor(redToBlue, out))).toEqual({ exact: 1, nearest: 1 });
@@ -123,6 +133,7 @@ describe('SourceImage', () => {
         { source: RED, ink: first },
         { source: RED, ink: second },
       ],
+      material: WHITE,
     });
     unwrap(red.recolor(twoInks(PANTONE_285, { r: 0, g: 0, b: 0 }), out));
     expect([...out.slice(0, 4)]).toEqual([58, 117, 196, 255]);
@@ -145,6 +156,7 @@ describe('SourceImage', () => {
         { source: RED, ink: first },
         { source: PANTONE_285, ink: second },
       ],
+      material: WHITE,
     });
     unwrap(gray.recolor(tie(a, b), pixel));
     expect([...pixel]).toEqual([0, 2, 227, 255]);
@@ -158,11 +170,15 @@ describe('SourceImage', () => {
     expect(short.status === 'error' && short.error.kind).toBe('outputLength');
 
     const malformed = [
-      { mappings: 'x' },
+      { mappings: 'x', material: WHITE },
       {},
       null,
-      { mappings: [{ source: { r: 300, g: 0, b: 0 }, ink: PANTONE_285 }] },
-      { mappings: [{ source: [230, 76, 60], ink: PANTONE_285 }] },
+      { mappings: [{ source: { r: 300, g: 0, b: 0 }, ink: PANTONE_285 }], material: WHITE },
+      { mappings: [{ source: [230, 76, 60], ink: PANTONE_285 }], material: WHITE },
+      // The material is required, and checked.
+      { mappings: [] },
+      { mappings: [], material: 'white' },
+      { mappings: [], material: { r: 256, g: 0, b: 0 } },
     ];
     for (const request of malformed) {
       const outcome = image.recolor(request as unknown as RecolorRequest, new Uint8Array(8));
@@ -176,17 +192,17 @@ describe('SourceImage', () => {
     const palette = unwrap(Palette.create(await pantoneData()));
     const image = redAndTransparent();
 
-    const pick = unwrap(image.pick(0, 0, undefined, palette));
+    const pick = unwrap(image.pick(0, 0, undefined, WHITE, palette));
     expect(pick.pixel).toEqual({ r: 230, g: 76, b: 60, a: 255 });
     expect(pick.matching).toEqual(RED);
     expect(pick.suggestion.name).toBe('Pantone 179');
     expect('mismatch' in pick).toBe(false);
 
-    const transparent = unwrap(image.pick(1, 0, undefined, palette));
+    const transparent = unwrap(image.pick(1, 0, undefined, WHITE, palette));
     expect(transparent.matching).toEqual({ r: 255, g: 255, b: 255 });
 
     // The color "seen" on screen is far off: still a valid pick, with a warning.
-    const warned = unwrap(image.pick(0, 0, { r: 230, g: 76, b: 160, a: 255 }, palette));
+    const warned = unwrap(image.pick(0, 0, { r: 230, g: 76, b: 160, a: 255 }, WHITE, palette));
     expect(warned.mismatch).toEqual({
       seen: { r: 230, g: 76, b: 160, a: 255 },
       stored: { r: 230, g: 76, b: 60, a: 255 },
@@ -194,7 +210,7 @@ describe('SourceImage', () => {
     });
     expect(warned.pixel).toEqual(pick.pixel);
 
-    const outside = image.pick(2, 0, undefined, palette);
+    const outside = image.pick(2, 0, undefined, WHITE, palette);
     expect(outside.status === 'error' && outside.error.kind).toBe('outOfBounds');
     palette.free();
   });
@@ -210,7 +226,7 @@ describe('SourceImage', () => {
     const image = unwrap(SourceImage.create(one, 1, 1));
     const palette = unwrap(Palette.create({ entries: [{ name: 'X', rgb: { r: 0, g: 0, b: 0 } }] }));
     for (const [x, y] of [[NaN, 0], [Infinity, 0], [-0.9, 0], [4294967296, 0], [0.5, 0], [0, -1]]) {
-      const picked = image.pick(x!, y!, undefined, palette);
+      const picked = image.pick(x!, y!, undefined, WHITE, palette);
       expect(picked.status === 'error' && picked.error.kind, `pick(${x}, ${y})`).toBe('invalidInput');
     }
     for (const k of [4294967296, 1.5, NaN, -1]) {
@@ -219,21 +235,21 @@ describe('SourceImage', () => {
     }
 
     // The same objects keep working.
-    expect(unwrap(image.pick(0, 0, undefined, palette)).pixel).toEqual({ r: 5, g: 6, b: 7, a: 255 });
+    expect(unwrap(image.pick(0, 0, undefined, WHITE, palette)).pixel).toEqual({ r: 5, g: 6, b: 7, a: 255 });
     expect(unwrap(palette.nearest({ r: 0, g: 0, b: 0 }, 1)).matches).toHaveLength(1);
   });
 
   test('free() releases the object; later calls throw', () => {
     const image = redAndTransparent();
     image.free();
-    expect(() => image.analyze()).toThrow();
+    expect(() => image.analyze(WHITE)).toThrow();
   });
 
   test('objects are disposable', () => {
     const image = redAndTransparent();
     expect(typeof image[Symbol.dispose]).toBe('function');
     image[Symbol.dispose]();
-    expect(() => image.analyze()).toThrow();
+    expect(() => image.analyze(WHITE)).toThrow();
   });
 });
 
@@ -245,18 +261,25 @@ describe('palette configs (W10 v)', () => {
     );
     const parsed = unwrap(parseConfig(text));
     expect(parsed.sections.map((s) => s.size)).toEqual([3, 7, 16]);
+    // No `material` line in the golden configs: white (M4.1 a).
+    expect(parsed.material).toEqual(WHITE);
     const section = parsed.sections[0]!;
 
     const palette = unwrap(Palette.create(await pantoneData()));
-    const resolved = unwrap(palette.resolveSection(section)).picks;
+    const resolved = unwrap(palette.resolveSection(section, parsed.material)).picks;
     expect(resolved.map((p) => p.ink.name)).toEqual(section.picks.map((p) => p.ink));
     expect(resolved[0]!.pixel).toEqual(section.picks[0]!.rgba);
 
-    const exported = unwrap(serializeConfig({ imageName: 'tiger.png', picks: section.picks })).text;
+    const exported = unwrap(
+      serializeConfig({ imageName: 'tiger.png', material: parsed.material, picks: section.picks }),
+    ).text;
     expect(exported).toMatch(/^# Palette exported from the reKolor web app for tiger\.png\./);
-    expect(unwrap(parseConfig(exported)).sections).toEqual([
-      { size: section.picks.length, picks: section.picks },
-    ]);
+    // Always written (M4 b).
+    expect(exported).toContain('\nmaterial = [255, 255, 255]\n');
+    expect(unwrap(parseConfig(exported))).toEqual({
+      material: WHITE,
+      sections: [{ size: section.picks.length, picks: section.picks }],
+    });
     palette.free();
   });
 
@@ -266,7 +289,7 @@ describe('palette configs (W10 v)', () => {
       palette.resolveSection({
         size: 1,
         picks: [{ rgba: { r: 9, g: 9, b: 9, a: 0 }, ink: 'Pure White (non-palette)' }],
-      }),
+      }, WHITE),
     ).picks;
     expect(pick!.matching).toEqual({ r: 255, g: 255, b: 255 });
     palette.free();
@@ -279,11 +302,72 @@ describe('palette configs (W10 v)', () => {
       if (outcome.status === 'error') expect(outcome.error.kind).toBe('invalidConfig');
     }
     const palette = unwrap(Palette.create(await pantoneData()));
-    const outcome = palette.resolveSection({
-      size: 1,
-      picks: [{ rgba: { r: 0, g: 0, b: 0, a: 255 }, ink: 'Pantone 99999' }],
-    });
+    const outcome = palette.resolveSection(
+      { size: 1, picks: [{ rgba: { r: 0, g: 0, b: 0, a: 255 }, ink: 'Pantone 99999' }] },
+      WHITE,
+    );
     expect(outcome).toMatchObject({ status: 'error', error: { kind: 'invalidConfig' } });
+    palette.free();
+  });
+});
+
+describe('the material color', () => {
+  test('every call composites over the material it is given', async () => {
+    const palette = unwrap(Palette.create(await pantoneData()));
+    // Transparent (hiding 9,9,9), opaque red, translucent red.
+    const image = unwrap(
+      SourceImage.create(new Uint8Array([9, 9, 9, 0, 230, 76, 60, 255, 203, 0, 0, 100]), 3, 1),
+    );
+
+    const transparent = unwrap(image.pick(0, 0, undefined, BLACK, palette));
+    expect(transparent.matching).toEqual(BLACK);
+    expect(transparent.suggestion.name).toBe('Pure Black (non-palette)');
+    expect(unwrap(image.pick(2, 0, undefined, BLACK, palette)).matching).toEqual({ r: 79, g: 0, b: 0 });
+
+    // No mappings: the image as it looks on the material (I8 c).
+    const out = new Uint8Array(12);
+    unwrap(image.recolor({ mappings: [], material: BLACK }, out));
+    expect([...out]).toEqual([0, 0, 0, 255, 230, 76, 60, 255, 79, 0, 0, 255]);
+    unwrap(image.recolor({ mappings: [], material: WHITE }, out));
+    expect([...out]).toEqual([255, 255, 255, 255, 230, 76, 60, 255, 234, 155, 155, 255]);
+
+    expect(unwrap(image.colorCount(BLACK))).toEqual({ colors: 3 });
+    expect(unwrap(image.analyze(BLACK)).colors).toBe(3);
+
+    const translucent = { r: 203, g: 0, b: 0, a: 100 };
+    expect(unwrap(composite(translucent, BLACK))).toEqual({ r: 79, g: 0, b: 0 });
+    expect(unwrap(composite(translucent, WHITE))).toEqual({ r: 234, g: 155, b: 155 });
+    expect(unwrap(composite(translucent, { r: 128, g: 128, b: 128 }))).toEqual({ r: 157, g: 77, b: 77 });
+
+    const bad = 'black' as unknown as Rgb;
+    for (const outcome of [
+      image.pick(0, 0, undefined, bad, palette),
+      image.colorCount(bad),
+      composite(translucent, bad),
+    ]) {
+      expect(outcome).toMatchObject({ status: 'error', error: { kind: 'invalidInput' } });
+    }
+    palette.free();
+  });
+
+  test('a config carries its material into resolving and back out', async () => {
+    const parsed = unwrap(
+      parseConfig(
+        'material = [0, 0, 0]\n\n[[palette]]\nsize = 1\npicks = [\n' +
+          '  { rgba = [9, 9, 9, 0], ink = "Pure Black (non-palette)" },\n]\n',
+      ),
+    );
+    expect(parsed.material).toEqual(BLACK);
+    const palette = unwrap(Palette.create(await pantoneData()));
+    const [pick] = unwrap(palette.resolveSection(parsed.sections[0]!, parsed.material)).picks;
+    expect(pick!.matching).toEqual(BLACK);
+    expect(pick!.ink.deltaE).toBe(0);
+
+    const text = unwrap(
+      serializeConfig({ imageName: 'x.png', material: BLACK, picks: parsed.sections[0]!.picks }),
+    ).text;
+    expect(text).toContain('\nmaterial = [0, 0, 0]\n');
+    expect(unwrap(parseConfig(text)).material).toEqual(BLACK);
     palette.free();
   });
 });

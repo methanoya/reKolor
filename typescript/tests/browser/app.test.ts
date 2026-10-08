@@ -473,4 +473,242 @@ describe('reKolor app', () => {
       await expect.poll(() => ink.title).toBe(labels[3]!.replace(/ · ΔE .*$/, ''));
     },
   );
+
+  // ── The material color (`.agents/material-color`) ──────────────────────────────────────────
+  // At 1:1, offsets from the canvas center: −18 → column 6 (opaque red), −6 → 18 (translucent
+  // red), +6 → 30 (transparent), +18 → 42 (opaque black).
+
+  /** 48 × 32 in four 12-column bands: opaque red, translucent red, transparent, opaque black. */
+  async function materialFile(): Promise<File> {
+    const canvas = new OffscreenCanvas(48, 32);
+    const context = canvas.getContext('2d')!;
+    context.fillStyle = 'rgb(200 40 40)';
+    context.fillRect(0, 0, 12, 32);
+    context.fillStyle = 'rgb(200 40 40 / 0.4)';
+    context.fillRect(12, 0, 12, 32);
+    context.fillStyle = 'rgb(0 0 0)';
+    context.fillRect(36, 0, 12, 32);
+    return new File([await canvas.convertToBlob({ type: 'image/png' })], 'bands.png');
+  }
+
+  const BANDS = [-18, -6, 6, 18];
+  const materialInput = (screen: { container: HTMLElement }) =>
+    screen.container.querySelector<HTMLInputElement>('[data-testid=material]')!;
+  const originalFrame = (screen: { container: HTMLElement }) =>
+    screen.container.querySelector(ORIGINAL)!.closest<HTMLElement>('.frame')!;
+
+  /** The RGBA pixel at (x, y) of the downloaded PNG. */
+  async function downloadedPixel(
+    screen: { getByTestId: (id: string) => { click(): Promise<void> } },
+    x: number,
+    y: number,
+  ) {
+    const download = captureDownload();
+    await screen.getByTestId('download').click();
+    const bitmap = await createImageBitmap((await download).blob);
+    const context = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d')!;
+    context.drawImage(bitmap, 0, 0);
+    return [...context.getImageData(x, y, 1, 1).data];
+  }
+
+  test('M5, M6: the material is the Original backdrop and names the zero-pick preview', async () => {
+    const screen = await render(App);
+    await expect.element(screen.getByText(/Engine ready/)).toBeVisible();
+    const input = screen.container.querySelector<HTMLInputElement>('#file')!;
+    await userEvent.upload(page.elementLocator(input), await materialFile());
+    await expect
+      .element(screen.getByText('No picks yet: the image as printed on white'))
+      .toBeVisible();
+    const white = screen.getByRole('button', { name: 'White' });
+    await expect.element(white).toBeDisabled();
+
+    await userEvent.fill(screen.getByTestId('material'), '#102030');
+    await expect
+      .element(screen.getByText('No picks yet: the image as printed on the material (#102030)'))
+      .toBeVisible();
+    // C5 a: the frame's background, not drawn into the image canvas; no checkerboard.
+    const frame = getComputedStyle(originalFrame(screen));
+    expect(frame.backgroundColor).toBe('rgb(16, 32, 48)');
+    expect(frame.backgroundImage).toBe('none');
+    // The transparent band of the zero-pick preview shows the material too (I8 c).
+    expect(await downloadedPixel(screen, 30, 16)).toEqual([16, 32, 48, 255]);
+
+    await white.click();
+    await expect
+      .element(screen.getByText('No picks yet: the image as printed on white'))
+      .toBeVisible();
+    expect(materialInput(screen).value).toBe('#ffffff');
+    expect(getComputedStyle(originalFrame(screen)).backgroundColor).toBe('rgb(255, 255, 255)');
+    await expect.element(white).toBeDisabled();
+    expect(await downloadedPixel(screen, 30, 16)).toEqual([255, 255, 255, 255]);
+  });
+
+  test('M3 a, M3.1 b: a material change re-suggests only the picks whose color changed', async () => {
+    const { screen, colors, selects, status } = await opened(await materialFile(), BANDS);
+    expect(colors()).toHaveLength(4);
+    // A hand-chosen ink on the opaque red pick.
+    await userEvent.selectOptions(selects()[0]!, '3');
+    await expect.poll(() => selects()[0]!.selectedIndex).toBe(3);
+    const ink = () => selects().map((s) => s.selectedOptions[0]!.text);
+    const before = ink();
+    expect(before[2]).toMatch(/^Pure White/); // transparent on white
+
+    await userEvent.fill(screen.getByTestId('material'), '#000000');
+    await expect.element(status).toHaveTextContent('Material #000000 · 2 picks re-suggested.');
+    const after = ink();
+    expect(selects()[0]!.selectedIndex).toBe(3); // opaque: the hand choice is kept
+    expect(after[0]).toBe(before[0]);
+    expect(selects()[1]!.selectedIndex).toBe(0); // translucent: re-suggested
+    expect(after[1]).not.toBe(before[1]);
+    expect(after[2]).toMatch(/^Pure Black/); // transparent: now the material, black
+    expect(after[3]).toBe(before[3]); // opaque black: unchanged
+    // M3.1 b: the transparent and the black pick now share (0, 0, 0); both stay.
+    expect(colors()).toHaveLength(4);
+    await expect.element(screen.getByText('Printed with 4 inks')).toBeVisible();
+    // The transparent band prints with the ink nearest the material.
+    expect(await downloadedPixel(screen, 30, 16)).toEqual([0, 0, 0, 255]);
+
+    // Back to white: nothing was removed, the hand ink is still there.
+    await screen.getByRole('button', { name: 'White' }).click();
+    await expect.element(status).toHaveTextContent('Material #ffffff · 2 picks re-suggested.');
+    expect(colors()).toHaveLength(4);
+    expect(selects()[0]!.selectedIndex).toBe(3);
+    expect(ink()[2]).toMatch(/^Pure White/);
+  });
+
+  test('C1 a: a burst of picker changes applies only the newest one', async () => {
+    const { screen, status } = await opened(await materialFile(), BANDS);
+    const posted = vi.spyOn(Worker.prototype, 'postMessage');
+    const input = materialInput(screen);
+    for (const color of ['#101010', '#202020', '#303030', '#404040', '#000000']) {
+      input.value = color;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    await expect.element(status).toHaveTextContent('Material #000000 · 2 picks re-suggested.');
+    const rematches = posted.mock.calls.filter(
+      ([message]) => (message as { path?: string[] } | null)?.path?.[0] === 'rematch',
+    );
+    expect(rematches).toHaveLength(1);
+  });
+
+  test('M4: export writes the material; import sets it (white if the file has none)', async () => {
+    const { screen, status } = await opened(await materialFile(), [-18]);
+    await userEvent.fill(screen.getByTestId('material'), '#000000');
+    await expect.element(status).toHaveTextContent('Material #000000.');
+    const download = captureDownload();
+    await screen.getByRole('button', { name: 'Export picks' }).click();
+    const exported = await download;
+    expect(exported.name).toBe('bands.palettes.toml');
+    expect(await exported.blob.text()).toContain('\nmaterial = [0, 0, 0]\n');
+
+    const configInput = screen.container.querySelector<HTMLInputElement>('input[accept^=".toml"]')!;
+    const config = (material: string) =>
+      new File(
+        [
+          material +
+            '[[palette]]\nsize = 1\npicks = [\n' +
+            '  { rgba = [0, 0, 0, 0], ink = "Pantone 285" },\n]\n',
+        ],
+        'one.palettes.toml',
+      );
+    await userEvent.upload(page.elementLocator(configInput), config('material = [16, 32, 48]\n\n'));
+    await expect
+      .element(status)
+      .toHaveTextContent('Imported 1 pick (size 1) from one.palettes.toml, on material #102030.');
+    expect(materialInput(screen).value).toBe('#102030');
+    expect(getComputedStyle(originalFrame(screen)).backgroundColor).toBe('rgb(16, 32, 48)');
+    // The transparent pick is matched on the file's material.
+    const matching = () =>
+      screen.container.querySelector<HTMLElement>('.pick .swatch:not(.checker):not(.ink)')!.title;
+    expect(matching()).toBe('On the material: #102030');
+
+    await userEvent.upload(page.elementLocator(configInput), config(''));
+    await expect
+      .element(status)
+      .toHaveTextContent('Imported 1 pick (size 1) from one.palettes.toml, on material #ffffff.');
+    expect(materialInput(screen).value).toBe('#ffffff');
+    expect(matching()).toBe('On white: #ffffff');
+  });
+
+  test('a move cancelled after a material change puts the pick back matched on the new one', async () => {
+    const { screen, colors, selects, mouse, shift, status } = await opened(
+      await materialFile(),
+      [-6],
+    );
+    await userEvent.selectOptions(selects()[0]!, '2');
+    await expect.poll(() => selects()[0]!.selectedIndex).toBe(2);
+    const before = colors();
+    const [, r, g, b, a] = /^rgb (\d+), (\d+), (\d+), alpha (\d+)$/.exec(before[0]!)!.map(Number);
+    await shift(true);
+    await mouse.down(-6);
+    await mouse.to(-18); // the opaque band: another color
+    await expect.poll(() => colors()[0]).not.toBe(before[0]);
+    // The material changes while the pick is still held (rare, but possible from the keyboard).
+    const input = materialInput(screen);
+    input.value = '#000000';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await expect.element(status).toMatchTextContent('Material #000000');
+    await userEvent.keyboard('{Escape}');
+    await expect.element(status).toHaveTextContent('Move cancelled.');
+    await mouse.up();
+    await shift(false);
+    expect(colors()).toEqual(before); // the stored pixel is back…
+    // …matched on black, so its color changed and the ink is the nearest again (M3 a).
+    const onBlack = [r!, g!, b!].map((c) => Math.floor((a! * c) / 255));
+    const title = screen.container.querySelector<HTMLElement>(
+      '.pick .swatch:not(.checker):not(.ink)',
+    )!.title;
+    expect(title).toBe(
+      `On the material: #${onBlack.map((c) => c.toString(16).padStart(2, '0')).join('')}`,
+    );
+    expect(selects()[0]!.selectedIndex).toBe(0);
+  });
+
+  test('C1 a (GPT review 1): material changes keep their order with an import between them', async () => {
+    const { screen, status } = await opened(await materialFile(), [-6]);
+    // Hold the worker's `rematch` messages, so the first material change keeps the queue busy.
+    const send = Worker.prototype.postMessage;
+    const held: (() => void)[] = [];
+    vi.spyOn(Worker.prototype, 'postMessage').mockImplementation(function (
+      this: Worker,
+      ...args: Parameters<Worker['postMessage']>
+    ) {
+      const call = () => send.apply(this, args);
+      if ((args[0] as { path?: string[] } | null)?.path?.[0] === 'rematch' && held.length === 0) {
+        held.push(call);
+      } else {
+        call();
+      }
+    });
+    const input = materialInput(screen);
+    const choose = (color: string) => {
+      input.value = color;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    choose('#101010'); // X: starts, and waits for the held re-match
+    await expect.poll(() => held.length).toBe(1);
+    choose('#202020'); // A: queued behind X
+    const configInput = screen.container.querySelector<HTMLInputElement>('input[accept^=".toml"]')!;
+    await userEvent.upload(
+      page.elementLocator(configInput),
+      new File(
+        [
+          'material = [16, 32, 48]\n\n[[palette]]\nsize = 1\npicks = [\n' +
+            '  { rgba = [0, 0, 0, 0], ink = "Pantone 285" },\n]\n',
+        ],
+        'one.palettes.toml',
+      ),
+    ); // the import: queued behind A
+    choose('#000000'); // B: the last action, so it must apply last
+    held[0]!();
+
+    await expect.element(status).toMatchTextContent('Material #000000');
+    expect(getComputedStyle(originalFrame(screen)).backgroundColor).toBe('rgb(0, 0, 0)');
+    expect(input.value).toBe('#000000');
+    // The imported pick, re-matched on B.
+    const title = screen.container.querySelector<HTMLElement>(
+      '.pick .swatch:not(.checker):not(.ink)',
+    )!.title;
+    expect(title).toBe('On the material: #000000');
+  });
 });

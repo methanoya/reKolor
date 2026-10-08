@@ -29,7 +29,12 @@ enum Command {
     /// Recolor an image with picks from a palette config or given on the command line.
     Recolor(RecolorArgs),
     /// Print an image's size, color counts and decoder warnings.
-    Analyze { input: PathBuf },
+    Analyze {
+        input: PathBuf,
+        /// Material color to count the colors on (default: white).
+        #[arg(long, value_name = "R,G,B", value_parser = parse_rgb)]
+        material: Option<Rgb8>,
+    },
     /// Palette configs (<name>.palettes.toml) for a samples tree.
     #[command(subcommand)]
     Palettes(PalettesCommand),
@@ -53,6 +58,10 @@ struct RecolorArgs {
     /// A pick: "R,G,B=INK NAME", e.g. "255,184,0=Pantone 1235". Repeatable.
     #[arg(long, value_name = "R,G,B=INK", required_unless_present = "config")]
     pick: Vec<String>,
+    /// Material color the image is composited over (the garment or substrate). Default: the
+    /// config's material with --config, else white; given with --config, it overrides the config's.
+    #[arg(long, value_name = "R,G,B", value_parser = parse_rgb)]
+    material: Option<Rgb8>,
 }
 
 #[derive(Subcommand)]
@@ -63,6 +72,9 @@ enum PalettesCommand {
         /// Overwrite existing configs (they may contain hand edits).
         #[arg(long)]
         force: bool,
+        /// Material color to match on, written into each config (default: white).
+        #[arg(long, value_name = "R,G,B", value_parser = parse_rgb)]
+        material: Option<Rgb8>,
     },
 }
 
@@ -91,45 +103,62 @@ fn run(cli: Cli) -> Result<()> {
         }
     };
     match cli.command {
-        Command::Analyze { input } => {
+        Command::Analyze { input, material } => {
+            let material = material.unwrap_or(Rgb8::WHITE);
             let image = decode(&input)?;
-            let s = analyze(image.view());
+            let s = analyze(image.view(), material);
             println!(
-                "{}: {}×{}, {} colors (composited over white), {} RGBA colors",
+                "{}: {}×{}, {} colors (composited over {}), {} RGBA colors",
                 input.display(),
                 s.width,
                 s.height,
                 s.colors,
+                describe(material),
                 s.rgba_colors
             );
             Ok(())
         }
         Command::Recolor(args) => {
             let palette = palette_file::load(&palette_path()?)?;
-            let mappings = match (&args.config, args.size) {
-                (Some(path), Some(size)) => config::load(path)?
-                    .size(size)?
-                    .mappings(&palette)
-                    .with_context(|| format!("{}", path.display()))?,
-                _ => args
-                    .pick
-                    .iter()
-                    .map(|p| parse_pick(p, &palette))
-                    .collect::<Result<_>>()?,
+            let (mappings, material) = match (&args.config, args.size) {
+                (Some(path), Some(size)) => {
+                    let config = config::load(path)?;
+                    // An explicit --material overrides the config's (C3 b).
+                    let material = args.material.unwrap_or(config.material.into());
+                    let mappings = config
+                        .size(size)?
+                        .mappings(&palette, material)
+                        .with_context(|| format!("{}", path.display()))?;
+                    (mappings, material)
+                }
+                _ => {
+                    let mappings = args
+                        .pick
+                        .iter()
+                        .map(|p| parse_pick(p, &palette))
+                        .collect::<Result<_>>()?;
+                    (mappings, args.material.unwrap_or(Rgb8::WHITE))
+                }
             };
             let image = decode(&args.input)?;
-            let stats = recolor_to_file(&image, &mappings, &args.output)?;
+            let stats = recolor_to_file(&image, &mappings, material, &args.output)?;
             println!(
-                "{} → {} ({} picks; {} exact, {} nearest pixels)",
+                "{} → {} ({} picks on {}; {} exact, {} nearest pixels)",
                 args.input.display(),
                 args.output.display(),
                 mappings.len(),
+                describe(material),
                 stats.exact,
                 stats.nearest
             );
             Ok(())
         }
-        Command::Palettes(PalettesCommand::Generate { dir, force }) => {
+        Command::Palettes(PalettesCommand::Generate {
+            dir,
+            force,
+            material,
+        }) => {
+            let material = material.unwrap_or(Rgb8::WHITE);
             let palette = palette_file::load(&palette_path()?)?;
             for input in discover::images(&dir)? {
                 let path = config::config_path(&input);
@@ -139,8 +168,9 @@ fn run(cli: Cli) -> Result<()> {
                 }
                 let image = decode(&input)?;
                 let max = *GOLDEN_SIZES.iter().max().expect("sizes") as usize;
-                let picks = generate::picks(image.view(), &palette, max);
+                let picks = generate::picks(image.view(), &palette, material, max);
                 let config = PaletteConfig {
+                    material: [material.r, material.g, material.b],
                     palette: GOLDEN_SIZES
                         .iter()
                         .map(|&size| SizedPalette {
@@ -187,18 +217,24 @@ fn run(cli: Cli) -> Result<()> {
                     continue;
                 }
                 let checked = config::load(&config_path).and_then(|config| {
-                    config
+                    let material = Rgb8::from(config.material);
+                    let sizes = config
                         .palette
                         .iter()
-                        .map(|sized| Ok((sized.size, sized.mappings(&palette)?)))
+                        .map(|sized| Ok((sized.size, sized.mappings(&palette, material)?)))
                         .collect::<Result<Vec<_>>>()
-                        .with_context(|| format!("{}", config_path.display()))
+                        .with_context(|| format!("{}", config_path.display()))?;
+                    Ok((material, sizes))
                 });
                 let decodable = rekolor_io::decode_file(&input)
                     .map(|_| ())
                     .with_context(|| format!("{}", input.display()));
                 match (checked, decodable) {
-                    (Ok(sizes), Ok(())) => jobs.push(GoldenJob { input, sizes }),
+                    (Ok((material, sizes)), Ok(())) => jobs.push(GoldenJob {
+                        input,
+                        material,
+                        sizes,
+                    }),
                     (checked, decodable) => problems.extend(
                         [checked.err(), decodable.err()]
                             .into_iter()
@@ -214,11 +250,16 @@ fn run(cli: Cli) -> Result<()> {
                 );
             }
             // Pass 2: render and write.
-            for GoldenJob { input, sizes } in jobs {
+            for GoldenJob {
+                input,
+                material,
+                sizes,
+            } in jobs
+            {
                 let image = decode(&input)?;
                 for (size, mappings) in sizes {
                     let output = config::output_path(&input, size);
-                    recolor_to_file(&image, &mappings, &output)?;
+                    recolor_to_file(&image, &mappings, material, &output)?;
                     println!("{}", output.display());
                 }
             }
@@ -227,9 +268,11 @@ fn run(cli: Cli) -> Result<()> {
     }
 }
 
-/// One image of a `golden update`, checked in pass 1: its outputs per palette size.
+/// One image of a `golden update`, checked in pass 1: its config's material and its outputs per
+/// palette size.
 struct GoldenJob {
     input: PathBuf,
+    material: Rgb8,
     sizes: Vec<(u32, Vec<Mapping>)>,
 }
 
@@ -245,12 +288,35 @@ fn decode(path: &Path) -> Result<DecodedImage> {
 fn recolor_to_file(
     image: &DecodedImage,
     mappings: &[Mapping],
+    material: Rgb8,
     output: &Path,
 ) -> Result<rekolor_core::RecolorStats> {
     let mut out = vec![0; image.rgba().len()];
-    let stats = recolor(image.view(), mappings, &mut out)?;
+    let stats = recolor(image.view(), mappings, material, &mut out)?;
     rekolor_io::write_png(output, &out, image.width(), image.height())?;
     Ok(stats)
+}
+
+/// "white" or "(r, g, b)", for messages.
+fn describe(material: Rgb8) -> String {
+    if material == Rgb8::WHITE {
+        "white".into()
+    } else {
+        format!("({}, {}, {})", material.r, material.g, material.b)
+    }
+}
+
+/// Parses "R,G,B" (a pick's color, `--material`).
+fn parse_rgb(text: &str) -> Result<Rgb8, String> {
+    let channels: Vec<u8> = text
+        .split(',')
+        .map(|c| c.trim().parse::<u8>())
+        .collect::<Result<_, _>>()
+        .map_err(|_| "R,G,B must be numbers 0–255".to_string())?;
+    let [r, g, b] = channels[..] else {
+        return Err("expected three channels R,G,B".into());
+    };
+    Ok(Rgb8::new(r, g, b))
 }
 
 /// Parses "R,G,B=INK NAME".
@@ -258,14 +324,7 @@ fn parse_pick(text: &str, palette: &Palette) -> Result<Mapping> {
     let Some((color, ink)) = text.split_once('=') else {
         bail!("pick {text:?}: expected R,G,B=INK NAME");
     };
-    let channels: Vec<u8> = color
-        .split(',')
-        .map(|c| c.trim().parse::<u8>())
-        .collect::<Result<_, _>>()
-        .with_context(|| format!("pick {text:?}: R,G,B must be numbers 0–255"))?;
-    let [r, g, b] = channels[..] else {
-        bail!("pick {text:?}: expected three channels R,G,B");
-    };
+    let source = parse_rgb(color).map_err(|e| anyhow::anyhow!("pick {text:?}: {e}"))?;
     let ink = ink.trim();
     let entry = palette
         .entries()
@@ -273,7 +332,7 @@ fn parse_pick(text: &str, palette: &Palette) -> Result<Mapping> {
         .find(|e| e.name == ink)
         .with_context(|| format!("pick {text:?}: ink {ink:?} is not in the palette"))?;
     Ok(Mapping {
-        source: Rgb8::new(r, g, b),
+        source,
         ink: entry.rgb,
     })
 }

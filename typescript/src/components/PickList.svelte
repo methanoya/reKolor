@@ -1,13 +1,18 @@
 <script lang="ts">
-  import { css, cssAlpha, hex, type PickEntry } from '../lib/picks';
+  import type { Rgb } from 'rekolor-wasm';
+  import { WHITE, css, cssAlpha, hex, sameRgb, type PickEntry } from '../lib/picks';
 
   interface Props {
     picks: PickEntry[];
+    /** The material the picks are matched on. */
+    material: Rgb;
     onink: (id: number, index: number) => void;
     onremove: (id: number) => void;
   }
 
-  let { picks, onink, onremove }: Props = $props();
+  let { picks, material, onink, onremove }: Props = $props();
+
+  const on = $derived(sameRgb(material, WHITE) ? 'On white' : 'On the material');
 </script>
 
 {#if picks.length === 0}
@@ -27,7 +32,7 @@
           <span
             class="swatch"
             style:background={css(pick.matching)}
-            title="On white: {hex(pick.matching)}"
+            title="{on}: {hex(pick.matching)}"
           ></span>
           <span class="arrow" aria-hidden="true">→</span>
           <span class="swatch ink" style:background={css(pick.ink.rgb)} title={pick.ink.name}

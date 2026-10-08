@@ -29,6 +29,11 @@
     onmove?: (move: PickMove) => void;
     /** Escape, or the pointer was taken away (`pointercancel`), during a pick move. */
     onmovecancel?: (drag: number) => void;
+    /**
+     * A CSS color behind the image instead of the checkerboard (the material, M5 a). Drawn as the
+     * frame's background, never into the image canvas, which must hold image pixels only (C5 a).
+     */
+    backdrop?: string;
   }
 
   let {
@@ -42,6 +47,7 @@
     onpick,
     onmove,
     onmovecancel,
+    backdrop,
   }: Props = $props();
 
   /** How far from a marker's center (CSS pixels) a Shift-drag still grabs it. */
@@ -259,7 +265,7 @@
 
 <figure class="view">
   <figcaption>{label}</figcaption>
-  <div class="frame" class:empty={!bitmap} bind:this={frame}>
+  <div class="frame" class:empty={!bitmap} style:background={backdrop} bind:this={frame}>
     <canvas
       bind:this={canvas}
       class:pickable={!!onpick && !!bitmap}

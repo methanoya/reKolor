@@ -48,7 +48,7 @@ main thread (Svelte)                      worker (src/lib/worker.ts)
   profile converted to sRGB. The size limits (50 MB file, 16,384 px per side, 24 megapixels) are
   checked before any pixel buffer is made.
 - **Picking:** a click maps through the zoom/pan transform to a source pixel; Rust reads the stored
-  pixel, composites it over white and suggests the nearest ink (R10). At 100 % and above the color
+  pixel, composites it over the material and suggests the nearest ink (R10). At 100 % and above the color
   on screen is sent too, and Rust warns if it differs from the stored pixel.
 - **Moving a pick:** hold Shift and drag its circle (`src/lib/moves.ts`). The pick follows the
   pointer pixel by pixel, re-picked as if clicked there, with the nearest ink for each new color;
@@ -58,6 +58,14 @@ main thread (Svelte)                      worker (src/lib/worker.ts)
   Away from a circle, Shift changes nothing (drag pans, click picks). Picks imported from a config
   have no circle. Moving needs a mouse or pen and a keyboard; there is no touch or keyboard-only way.
   Circles are drawn on their own canvas, so the color read for the warning above is never a circle.
+- **Material:** the garment or surface color (toolbar: a color input and "White"; white by
+  default). Every engine call composites over it: picks, the preview, the color count. The Original
+  panel shows it behind the image (as the frame's background, never in the image canvas). It applies
+  live while the picker is open: inputs merge into the queued change while it hasn't started and
+  nothing else was queued after it (`Serial.coalescing`), so a burst is one change and a change never
+  passes another pick-list change made before it. A change re-matches the picks: one whose composited color changed gets the
+  nearest ink again; the others keep theirs, hand-chosen or not. Picks that end up with the same color
+  are all kept (the earlier one's ink prints that exact color). It isn't remembered across reloads.
 - **Live recolor:** at most one recolor runs and one waits (the newest picks); every result carries
   the image generation and pick revision, and only the current one is shown or downloaded. A failed
   open keeps the previous image (its generation changes only when an open succeeds).
@@ -66,7 +74,8 @@ main thread (Svelte)                      worker (src/lib/worker.ts)
 - **Download** encodes the current result at full resolution (PNG, in the worker); if the image or
   picks change while it encodes, nothing is saved.
 - **Palette configs:** import/export the picks as `*.palettes.toml`, the CLI's golden-set format,
-  read and written by the shared Rust crate `rekolor-config`.
+  read and written by the shared Rust crate `rekolor-config`. Export always writes the material;
+  import sets it from the file (white if the file has none) and keeps the file's picks as written.
 - **Errors** come back as values (`AppOutcome`); a crashed worker is restarted and the user is told.
 
 ## Browser differences found by the cross-decoder test (M2)

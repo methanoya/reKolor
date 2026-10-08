@@ -10,7 +10,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
-use rekolor_core::{ImageRef, Mapping, analyze, recolor};
+use rekolor_core::{ImageRef, Mapping, Rgb8, analyze, recolor};
 
 fn baseline_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/baseline")
@@ -81,7 +81,7 @@ fn recolor_reproduces_the_baseline() {
                 })
                 .collect();
             let mut out = vec![0; fixture.rgba.len()];
-            let stats = recolor(image, &mappings, &mut out).unwrap();
+            let stats = recolor(image, &mappings, Rgb8::WHITE, &mut out).unwrap();
             assert_eq!(
                 stats.exact + stats.nearest,
                 u64::from(fixture.width * fixture.height)
@@ -112,7 +112,8 @@ fn analyze_reproduces_image_info() {
     assert_eq!(rows.len(), generator::fixtures().len());
     for row in rows {
         let fixture = generator::fixture(row[0]);
-        let stats = analyze(ImageRef::new(&fixture.rgba, fixture.width, fixture.height).unwrap());
+        let image = ImageRef::new(&fixture.rgba, fixture.width, fixture.height).unwrap();
+        let stats = analyze(image, Rgb8::WHITE);
         let expected: Vec<u64> = row[1..].iter().map(|v| v.parse().unwrap()).collect();
         assert_eq!(
             vec![
