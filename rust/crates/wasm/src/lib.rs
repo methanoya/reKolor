@@ -17,19 +17,20 @@ mod palette;
 mod types;
 
 pub use config::{
-    ConfigExport, ConfigPick, ConfigSection, ConfigText, ParsedConfig, ResolvedPick, ResolvedPicks,
-    parse_config, serialize_config,
+    ConfigExport, ConfigPick, ConfigSection, ConfigText, ConfigUnprinted, ParsedConfig,
+    ResolvedPick, ResolvedPicks, parse_config, serialize_config,
 };
-pub use image::SourceImage;
 pub use image::SourceImageOutcome;
+pub use image::{SourceImage, composite};
 pub use outcome::{
-    ErrorInfo, ErrorKind, NearestOutcome, Outcome, PickOutcome, RecolorOutcome, SuggestOutcome,
+    ColorCountOutcome, ErrorInfo, ErrorKind, ImageStatsOutcome, NearestOutcome, Outcome,
+    PickOutcome, RecolorOutcome, RgbOutcome, SuggestOutcome,
 };
 pub use palette::Palette;
 pub use palette::PaletteOutcome;
 pub use types::{
-    ColorMismatch, ImageStats, Mapping, PaletteData, PaletteEntry, PaletteMatch, PaletteMatches,
-    Pick, RecolorRequest, RecolorStats, Rgb, Rgba,
+    ColorCount, ColorMismatch, ImageStats, Mapping, MaterialRange, PaletteData, PaletteEntry,
+    PaletteMatch, PaletteMatches, Pick, RecolorRequest, RecolorStats, Rgb, Rgba,
 };
 
 use wasm_bindgen::prelude::*;

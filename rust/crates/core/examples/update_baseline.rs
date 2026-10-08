@@ -45,7 +45,7 @@ fn main() {
                 })
                 .collect();
             let mut out = vec![0; fixture.rgba.len()];
-            recolor(image, &mappings, &mut out).unwrap();
+            recolor(image, &mappings, Rgb8::WHITE, &mut out).unwrap();
             let path = baseline.join(format!("recolor/{}__{}.png", fixture.name, set.name));
             // Rewrite unless size and pixels both match (the baseline test checks both).
             let current = decode_png(&path);
@@ -62,7 +62,8 @@ fn main() {
     // Image info.
     let mut info = String::from("# fixture\twidth\theight\tcolors\trgba_colors\n");
     for fixture in generator::fixtures() {
-        let s = analyze(ImageRef::new(&fixture.rgba, fixture.width, fixture.height).unwrap());
+        let image = ImageRef::new(&fixture.rgba, fixture.width, fixture.height).unwrap();
+        let s = analyze(image, Rgb8::WHITE);
         writeln!(
             info,
             "{}\t{}\t{}\t{}\t{}",

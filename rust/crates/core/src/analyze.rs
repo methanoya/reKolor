@@ -1,37 +1,39 @@
 use std::collections::HashSet;
 
-use crate::{ImageRef, composite_over_white};
+use crate::{ImageRef, Rgb8, composite};
 
 /// Size and color counts of an image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImageStats {
     pub width: u32,
     pub height: u32,
-    /// Distinct colors after compositing over white: what [`recolor`](crate::recolor) actually
-    /// matches (I4). Fully transparent pixels count as white, whatever RGB they hide.
+    /// Distinct colors after compositing over the material: what [`recolor`](crate::recolor)
+    /// actually matches (I4). Fully transparent pixels count as the material, whatever RGB they
+    /// hide.
     pub colors: u64,
     /// Distinct RGBA values, as stored.
     pub rgba_colors: u64,
 }
 
-pub fn analyze(image: ImageRef<'_>) -> ImageStats {
+/// Size and color counts; `colors` depends on the material, `rgba_colors` doesn't.
+pub fn analyze(image: ImageRef<'_>, material: Rgb8) -> ImageStats {
     let rgba: HashSet<_> = image.pixels().collect();
     ImageStats {
         width: image.width(),
         height: image.height(),
-        colors: color_count(image),
+        colors: color_count(image, material),
         rgba_colors: rgba.len() as u64,
     }
 }
 
-/// Distinct colors after compositing over white ([`ImageStats::colors`]) with fixed memory: one
-/// bit per possible color (2^24 bits = 2 MiB), whatever the image. [`analyze`] also counts RGBA
-/// values, which needs memory per distinct value; this is the bounded part on its own.
-pub fn color_count(image: ImageRef<'_>) -> u64 {
+/// Distinct colors after compositing over the material ([`ImageStats::colors`]) with fixed
+/// memory: one bit per possible color (2^24 bits = 2 MiB), whatever the image. [`analyze`] also
+/// counts RGBA values, which needs memory per distinct value; this is the bounded part on its own.
+pub fn color_count(image: ImageRef<'_>, material: Rgb8) -> u64 {
     let mut seen = vec![0u64; 1 << 18];
     let mut count = 0;
     for p in image.pixels() {
-        let c = composite_over_white(p);
+        let c = composite(p, material);
         let key = (usize::from(c.r) << 16) | (usize::from(c.g) << 8) | usize::from(c.b);
         let (word, bit) = (key >> 6, 1u64 << (key & 63));
         if seen[word] & bit == 0 {
@@ -56,8 +58,14 @@ mod tests {
             }
         }
         let image = ImageRef::new(&buf, 6, 256).unwrap();
-        let set: HashSet<_> = image.pixels().map(composite_over_white).collect();
-        assert_eq!(color_count(image), set.len() as u64);
+        for material in [Rgb8::WHITE, Rgb8::new(0, 0, 0), Rgb8::new(20, 140, 230)] {
+            let set: HashSet<_> = image.pixels().map(|p| composite(p, material)).collect();
+            assert_eq!(
+                color_count(image, material),
+                set.len() as u64,
+                "{material:?}"
+            );
+        }
     }
 
     #[test]
@@ -65,7 +73,7 @@ mod tests {
         // Opaque (1,2,3); transparent hiding (7,7,7) → white; opaque white; half-transparent
         // (9,9,9) → (131,131,131). The old count (RGB, alpha ignored) would have been 4.
         let buf = [1, 2, 3, 255, 7, 7, 7, 0, 255, 255, 255, 255, 9, 9, 9, 128];
-        let stats = analyze(ImageRef::new(&buf, 2, 2).unwrap());
+        let stats = analyze(ImageRef::new(&buf, 2, 2).unwrap(), Rgb8::WHITE);
         assert_eq!(
             stats,
             ImageStats {
@@ -75,5 +83,15 @@ mod tests {
                 rgba_colors: 4
             }
         );
+    }
+
+    #[test]
+    fn colors_are_counted_on_the_material() {
+        // Transparent (7,7,7,0) and opaque black: one color on black, two on white.
+        let buf = [7, 7, 7, 0, 0, 0, 0, 255];
+        let image = ImageRef::new(&buf, 2, 1).unwrap();
+        assert_eq!(analyze(image, Rgb8::new(0, 0, 0)).colors, 1);
+        assert_eq!(analyze(image, Rgb8::WHITE).colors, 2);
+        assert_eq!(analyze(image, Rgb8::new(0, 0, 0)).rgba_colors, 2);
     }
 }

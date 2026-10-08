@@ -12,6 +12,8 @@ const value = <T>(outcome: AppOutcome<T>): T => {
   return outcome.value;
 };
 
+const WHITE = { r: 255, g: 255, b: 255 };
+
 const restarts: string[] = [];
 const client = new EngineClient((reason) => restarts.push(reason));
 afterAll(() => client.dispose());
@@ -33,12 +35,12 @@ describe('the engine worker', () => {
 
     const rust = await rustPixels('opaque');
     const [r, g, b] = rust.subarray((5 * 48 + 7) * 4);
-    const pick = value(await client.call((api) => api.pick(1, 7, 5)));
+    const pick = value(await client.call((api) => api.pick(1, 7, 5, WHITE)));
     expect(pick.pixel).toEqual({ r, g, b, a: 255 });
 
     const ink = { r: 58, g: 117, b: 196 };
     const recolored = value(
-      await client.call((api) => api.recolor(1, 1, [{ source: pick.matching, ink }])),
+      await client.call((api) => api.recolor(1, 1, [{ source: pick.matching, ink }], WHITE)),
     );
     expect([recolored.generation, recolored.revision]).toEqual([1, 1]);
     recolored.bitmap.close();
@@ -64,8 +66,8 @@ describe('the engine worker', () => {
     const file = await fixtureFile('opaque');
     value(await client.call((api) => api.open(file, 2))).bitmap.close();
     for (const outcome of [
-      await client.call((api) => api.pick(1, 0, 0)),
-      await client.call((api) => api.recolor(1, 9, [])),
+      await client.call((api) => api.pick(1, 0, 0, WHITE)),
+      await client.call((api) => api.recolor(1, 9, [], WHITE)),
       await client.call((api) => api.encodePng(1, 1)),
     ]) {
       expect(outcome).toMatchObject({ status: 'error', error: { kind: 'superseded' } });
@@ -82,8 +84,8 @@ describe('the engine worker', () => {
     if (a.status === 'ok') a.value.bitmap.close();
     else expect(a.error.kind).toBe('superseded');
     value(b).bitmap.close();
-    expect(value(await client.call((api) => api.pick(4, 47, 31))).pixel.a).toBe(255);
-    expect(await client.call((api) => api.pick(3, 0, 0))).toMatchObject({ status: 'error' });
+    expect(value(await client.call((api) => api.pick(4, 47, 31, WHITE))).pixel.a).toBe(255);
+    expect(await client.call((api) => api.pick(3, 0, 0, WHITE))).toMatchObject({ status: 'error' });
   });
 
   test('undecodable files and oversized configs are typed errors; the worker keeps working', async () => {

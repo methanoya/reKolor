@@ -22,6 +22,8 @@
     view: View;
     /** Source pixels to mark (picks made by clicking), by pick id. */
     markers?: { id: number; x: number; y: number }[];
+    /** Source pixels to mark with a square (colors left unprinted, U3); not movable. */
+    squares?: { x: number; y: number }[];
     placeholder: string;
     onview: (view: View) => void;
     onviewport: (size: Size) => void;
@@ -29,6 +31,11 @@
     onmove?: (move: PickMove) => void;
     /** Escape, or the pointer was taken away (`pointercancel`), during a pick move. */
     onmovecancel?: (drag: number) => void;
+    /**
+     * A CSS color behind the image instead of the checkerboard (the material, M5 a). Drawn as the
+     * frame's background, never into the image canvas, which must hold image pixels only (C5 a).
+     */
+    backdrop?: string | undefined;
   }
 
   let {
@@ -36,12 +43,14 @@
     bitmap,
     view,
     markers = [],
+    squares = [],
     placeholder,
     onview,
     onviewport,
     onpick,
     onmove,
     onmovecancel,
+    backdrop,
   }: Props = $props();
 
   /** How far from a marker's center (CSS pixels) a Shift-drag still grabs it. */
@@ -89,16 +98,25 @@
     overlay.height = Math.max(1, Math.round(size.height * dpr));
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (!bitmap) return;
-    for (const m of markers) {
-      const { px, py } = pixelCenter(view, m.x, m.y);
-      context.beginPath();
-      context.arc(px, py, 6, 0, 2 * Math.PI);
+    const outline = () => {
       context.lineWidth = 3;
       context.strokeStyle = 'rgb(0 0 0 / 0.75)';
       context.stroke();
       context.lineWidth = 1.5;
       context.strokeStyle = 'white';
       context.stroke();
+    };
+    for (const m of markers) {
+      const { px, py } = pixelCenter(view, m.x, m.y);
+      context.beginPath();
+      context.arc(px, py, 6, 0, 2 * Math.PI);
+      outline();
+    }
+    for (const s of squares) {
+      const { px, py } = pixelCenter(view, s.x, s.y);
+      context.beginPath();
+      context.rect(px - 5.5, py - 5.5, 11, 11);
+      outline();
     }
   });
 
@@ -259,7 +277,7 @@
 
 <figure class="view">
   <figcaption>{label}</figcaption>
-  <div class="frame" class:empty={!bitmap} bind:this={frame}>
+  <div class="frame" class:empty={!bitmap} style:background={backdrop} bind:this={frame}>
     <canvas
       bind:this={canvas}
       class:pickable={!!onpick && !!bitmap}
@@ -277,7 +295,7 @@
       }}
     ></canvas>
     <canvas bind:this={overlay} class="overlay" aria-hidden="true"></canvas>
-    {#if !bitmap}
+    {#if !bitmap && placeholder}
       <p class="placeholder">{placeholder}</p>
     {/if}
   </div>

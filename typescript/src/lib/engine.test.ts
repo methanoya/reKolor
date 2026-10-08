@@ -19,6 +19,9 @@ beforeAll(async () => {
 /** 2×1: opaque red, then fully transparent. */
 const redAndClear = () => new Uint8Array([230, 76, 60, 255, 9, 9, 9, 0]);
 
+const WHITE = { r: 255, g: 255, b: 255 };
+const BLACK = { r: 0, g: 0, b: 0 };
+
 describe('Engine', () => {
   test('starts from the Pantone palette in file order', () => {
     const engine = value(Engine.create(palette));
@@ -34,9 +37,14 @@ describe('Engine', () => {
 
   test('calls without an image are noImage errors', () => {
     const engine = value(Engine.create(palette));
-    expect(engine.pick(0, 0)).toMatchObject({ status: 'error', error: { kind: 'noImage' } });
-    expect(engine.recolor([])).toMatchObject({ status: 'error', error: { kind: 'noImage' } });
-    expect(engine.analyze()).toMatchObject({ status: 'error', error: { kind: 'noImage' } });
+    for (const outcome of [
+      engine.pick(0, 0, WHITE),
+      engine.recolor([], WHITE),
+      engine.analyze(WHITE),
+      engine.colorCount(WHITE),
+    ]) {
+      expect(outcome).toMatchObject({ status: 'error', error: { kind: 'noImage' } });
+    }
     engine.dispose();
   });
 
@@ -44,17 +52,23 @@ describe('Engine', () => {
     const engine = value(Engine.create(palette));
     expect(value(engine.open(redAndClear(), 2, 1))).toEqual({ width: 2, height: 1 });
 
-    const pick = value(engine.pick(1, 0));
+    const pick = value(engine.pick(1, 0, WHITE));
     expect(pick.pixel).toEqual({ r: 9, g: 9, b: 9, a: 0 });
     expect(pick.matching).toEqual({ r: 255, g: 255, b: 255 });
     expect(pick.suggestion.name).toBe('Pure White (non-palette)');
 
-    expect(value(engine.analyze())).toEqual({ width: 2, height: 1, colors: 2, rgbaColors: 2 });
+    expect(value(engine.analyze(WHITE))).toEqual({
+      width: 2,
+      height: 1,
+      colors: 2,
+      rgbaColors: 2,
+    });
+    expect(value(engine.colorCount(WHITE))).toBe(2);
 
-    // Zero picks (WA4): the image as printed on white.
-    expect([...value(engine.recolor([]))]).toEqual([230, 76, 60, 255, 255, 255, 255, 255]);
+    // Zero picks (the engine's I8 c): the image as printed on white; the app shows nothing then (U10).
+    expect([...value(engine.recolor([], WHITE))]).toEqual([230, 76, 60, 255, 255, 255, 255, 255]);
     const ink = { r: 58, g: 117, b: 196 };
-    const out = value(engine.recolor([{ source: { r: 230, g: 76, b: 60 }, ink }]));
+    const out = value(engine.recolor([{ source: { r: 230, g: 76, b: 60 }, ink }], WHITE));
     expect([...out]).toEqual([58, 117, 196, 255, 58, 117, 196, 255]);
     engine.dispose();
   });
@@ -89,7 +103,10 @@ describe('Engine', () => {
   test('pick outside the image is an outOfBounds error', () => {
     const engine = value(Engine.create(palette));
     value(engine.open(redAndClear(), 2, 1));
-    expect(engine.pick(2, 0)).toMatchObject({ status: 'error', error: { kind: 'outOfBounds' } });
+    expect(engine.pick(2, 0, WHITE)).toMatchObject({
+      status: 'error',
+      error: { kind: 'outOfBounds' },
+    });
     engine.dispose();
   });
 
@@ -110,7 +127,43 @@ describe('Engine', () => {
     value(engine.open(redAndClear(), 2, 1));
     engine.close();
     expect(engine.image).toBeUndefined();
-    expect(engine.pick(0, 0)).toMatchObject({ status: 'error', error: { kind: 'noImage' } });
+    expect(engine.pick(0, 0, WHITE)).toMatchObject({ status: 'error', error: { kind: 'noImage' } });
+    engine.dispose();
+  });
+
+  test('every call composites over the material it is given', () => {
+    const engine = value(Engine.create(palette));
+    value(engine.open(redAndClear(), 2, 1));
+    const pick = value(engine.pick(1, 0, BLACK));
+    expect(pick.matching).toEqual(BLACK);
+    expect(pick.suggestion.name).toBe('Pure Black (non-palette)');
+    expect(value(engine.pick(0, 0, BLACK)).matching).toEqual({ r: 230, g: 76, b: 60 });
+    // Zero picks: the image as printed on the material.
+    expect([...value(engine.recolor([], BLACK))]).toEqual([230, 76, 60, 255, 0, 0, 0, 255]);
+    expect(value(engine.analyze(BLACK)).colors).toBe(2);
+    expect(value(engine.composite({ r: 203, g: 0, b: 0, a: 100 }, BLACK))).toEqual({
+      r: 79,
+      g: 0,
+      b: 0,
+    });
+    engine.dispose();
+  });
+
+  test('colors left unprinted are transparent in the output', () => {
+    const engine = value(Engine.create(palette));
+    value(engine.open(redAndClear(), 2, 1));
+    // The material's own color (what the app adds when a material is chosen): the transparent
+    // pixel is the material, so it takes no ink.
+    const ranges = [{ pixel: { ...BLACK, a: 255 }, deltaE: 10 }];
+    const ink = { r: 58, g: 117, b: 196 };
+    const mappings = [{ source: { r: 230, g: 76, b: 60 }, ink }];
+    expect([...value(engine.recolor(mappings, BLACK, ranges))]).toEqual([
+      58, 117, 196, 255, 0, 0, 0, 0,
+    ]);
+    // Without ranges (the default), it takes the ink like any other pixel.
+    expect([...value(engine.recolor(mappings, BLACK))]).toEqual([
+      58, 117, 196, 255, 58, 117, 196, 255,
+    ]);
     engine.dispose();
   });
 });
@@ -126,19 +179,35 @@ describe('Engine configs (W10 v)', () => {
     const engine = value(Engine.create(palette));
     const parsed = value(engine.parseConfig(await sample()));
     expect(parsed.sections.map((s) => s.size)).toEqual([3, 7, 16]);
+    expect(parsed.material).toEqual(WHITE); // no `material` line: white (M4.1 a)
     const section = parsed.sections[1]!;
-    const resolved = value(engine.resolveSection(section));
+    const resolved = value(engine.resolveSection(section, parsed.material));
     expect(resolved.map((p) => p.ink.name)).toEqual(section.picks.map((p) => p.ink));
 
     const text = value(
       engine.exportConfig(
         'icon-calendar.png',
+        parsed.material,
         resolved.map((p) => ({ rgba: p.pixel, ink: p.ink.name })),
       ),
     );
-    expect(value(engine.parseConfig(text)).sections).toEqual([
-      { size: section.picks.length, picks: section.picks },
-    ]);
+    expect(value(engine.parseConfig(text))).toEqual({
+      material: WHITE,
+      unprinted: [],
+      sections: [{ size: section.picks.length, picks: section.picks }],
+    });
+    engine.dispose();
+  });
+
+  test('unprinted colors are exported and read back (K8)', () => {
+    const engine = value(Engine.create(palette));
+    const unprinted = [
+      { kind: 'material' as const, deltaE: 10 },
+      { kind: 'color' as const, rgba: { r: 200, g: 40, b: 40, a: 255 }, deltaE: 12.5 },
+    ];
+    const text = value(engine.exportConfig('x.png', BLACK, [], unprinted));
+    expect(text).toContain('{ material = true, delta_e = 10 }');
+    expect(value(engine.parseConfig(text)).unprinted).toEqual(unprinted);
     engine.dispose();
   });
 
@@ -149,10 +218,10 @@ describe('Engine configs (W10 v)', () => {
       error: { kind: 'invalidConfig' },
     });
     expect(
-      engine.resolveSection({
-        size: 1,
-        picks: [{ rgba: { r: 0, g: 0, b: 0, a: 255 }, ink: 'Not an ink' }],
-      }),
+      engine.resolveSection(
+        { size: 1, picks: [{ rgba: { r: 0, g: 0, b: 0, a: 255 }, ink: 'Not an ink' }] },
+        WHITE,
+      ),
     ).toMatchObject({
       status: 'error',
       error: { kind: 'invalidConfig', message: expect.stringContaining('Not an ink') },

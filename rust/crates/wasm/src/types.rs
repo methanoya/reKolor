@@ -26,9 +26,27 @@ pub struct Mapping {
     pub ink: Rgb,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+/// A color left unprinted: pixels within `deltaE` (CIEDE2000) of `pixel` composited over the
+/// material take no ink and are transparent in the output, so the material shows there.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Tsify)]
+#[serde(rename_all = "camelCase")]
+pub struct MaterialRange {
+    /// A pixel from the image, as stored (or the material itself, opaque).
+    pub pixel: Rgba,
+    /// From 0 to 100.
+    pub delta_e: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Tsify)]
 pub struct RecolorRequest {
     pub mappings: Vec<Mapping>,
+    /// The material color the image is composited over (the garment or substrate). Required: white
+    /// reproduces the behavior from before the material.
+    pub material: Rgb,
+    /// Colors left unprinted, checked before the mappings. None if absent.
+    #[tsify(optional)]
+    #[serde(default, rename = "materialRanges")]
+    pub material_ranges: Vec<MaterialRange>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Tsify)]
@@ -44,10 +62,17 @@ pub struct RecolorStats {
 pub struct ImageStats {
     pub width: u32,
     pub height: u32,
-    /// Distinct colors after compositing over white: what `recolor` matches.
+    /// Distinct colors after compositing over the material: what `recolor` matches.
     pub colors: f64,
     /// Distinct RGBA values.
     pub rgba_colors: f64,
+}
+
+/// The number of distinct colors after compositing over the material (`SourceImage.colorCount`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Tsify)]
+pub struct ColorCount {
+    /// At most 2^24, exact as a JS number.
+    pub colors: f64,
 }
 
 /// One palette color as passed in, e.g. from `palettes/pantone.json`.
@@ -94,7 +119,7 @@ pub struct ColorMismatch {
 pub struct Pick {
     /// The stored pixel.
     pub pixel: Rgba,
-    /// The color used for matching (the pixel composited over white).
+    /// The color used for matching (the pixel composited over the material).
     pub matching: Rgb,
     /// The suggested palette entry.
     pub suggestion: PaletteMatch,

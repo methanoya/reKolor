@@ -11,6 +11,9 @@ pub struct Rgb8 {
 }
 
 impl Rgb8 {
+    /// The default material: compositing over it is the behavior before the material color.
+    pub const WHITE: Self = Self::new(255, 255, 255);
+
     pub const fn new(r: u8, g: u8, b: u8) -> Self {
         Self { r, g, b }
     }
@@ -43,11 +46,23 @@ impl From<[u8; 4]> for Rgba8 {
     }
 }
 
-/// Composites a pixel over white with the existing integer formula `(255 - a) + a * c / 255`,
-/// which truncates. Can't overflow: the result is at most `255 - a + a = 255`.
-pub fn composite_over_white(Rgba8 { r, g, b, a }: Rgba8) -> Rgb8 {
-    let channel = |c: u8| (255 - a) + (u16::from(a) * u16::from(c) / 255) as u8;
-    Rgb8::new(channel(r), channel(g), channel(b))
+/// Composites a pixel over the material color (the garment or substrate), per channel
+/// `(a·c + (255 − a)·m) / 255`, truncating. Mixes the stored (encoded) sRGB values, not linear
+/// light. `a = 255` gives the pixel's color and `a = 0` the material, whatever RGB a transparent
+/// pixel hides.
+///
+/// Over [`Rgb8::WHITE`] this is exactly the existing formula `(255 − a) + a·c / 255`, since
+/// `255·(255 − a)` divides by 255, so white reproduces the behavior from before the material.
+pub fn composite(Rgba8 { r, g, b, a }: Rgba8, material: Rgb8) -> Rgb8 {
+    let a = u32::from(a);
+    // The sum is at most a·255 + (255 − a)·255 = 255·255 (the terms share `a`), so the quotient
+    // fits in a u8.
+    let channel = |c: u8, m: u8| ((a * u32::from(c) + (255 - a) * u32::from(m)) / 255) as u8;
+    Rgb8::new(
+        channel(r, material.r),
+        channel(g, material.g),
+        channel(b, material.b),
+    )
 }
 
 /// CIE L\*a\*b\* with the D65 white point, in `f32` (the `palette` crate's type; R11, D6.1).
@@ -78,31 +93,71 @@ pub fn delta_e_2000(x: Rgb8, y: Rgb8) -> f32 {
 mod tests {
     use super::*;
 
+    const BLACK: Rgb8 = Rgb8::new(0, 0, 0);
+
     #[test]
-    fn composite_keeps_opaque_and_whitens_transparent() {
-        assert_eq!(
-            composite_over_white(Rgba8::new(10, 20, 30, 255)),
-            Rgb8::new(10, 20, 30)
-        );
-        assert_eq!(
-            composite_over_white(Rgba8::new(10, 20, 30, 0)),
-            Rgb8::new(255, 255, 255)
-        );
+    fn composite_keeps_opaque_and_turns_transparent_into_the_material() {
+        for material in [Rgb8::WHITE, BLACK, Rgb8::new(20, 140, 230)] {
+            assert_eq!(
+                composite(Rgba8::new(10, 20, 30, 255), material),
+                Rgb8::new(10, 20, 30)
+            );
+            assert_eq!(composite(Rgba8::new(10, 20, 30, 0), material), material);
+        }
     }
 
     #[test]
     fn composite_truncates() {
         // (255 - 100) + 100 * 203 / 255 = 155 + 79.6… → 234 (the 2023 TypeScript rounded to 235)
-        assert_eq!(composite_over_white(Rgba8::new(203, 0, 0, 100)).r, 234);
+        assert_eq!(composite(Rgba8::new(203, 0, 0, 100), Rgb8::WHITE).r, 234);
         // (255 - 200) + 200 * 10 / 255 = 55 + 7.8… → 62
-        assert_eq!(composite_over_white(Rgba8::new(10, 0, 0, 200)).r, 62);
+        assert_eq!(composite(Rgba8::new(10, 0, 0, 200), Rgb8::WHITE).r, 62);
     }
 
     #[test]
-    fn composite_never_overflows() {
+    fn composite_mixes_toward_the_material() {
+        // The example in `.agents/material-color/decisions.md`: (100·203 + 155·m) / 255 for red,
+        // 155·m / 255 for green and blue.
+        let pixel = Rgba8::new(203, 0, 0, 100);
+        assert_eq!(composite(pixel, Rgb8::WHITE), Rgb8::new(234, 155, 155));
+        assert_eq!(
+            composite(pixel, Rgb8::new(128, 128, 128)),
+            Rgb8::new(157, 77, 77)
+        );
+        assert_eq!(composite(pixel, BLACK), Rgb8::new(79, 0, 0));
+    }
+
+    #[test]
+    fn composite_over_white_is_the_existing_formula() {
+        // The formula from before the material, kept here as the reference.
+        let existing = |c: u8, a: u8| (255 - a) + (u16::from(a) * u16::from(c) / 255) as u8;
         for a in 0..=255u8 {
             for c in 0..=255u8 {
-                composite_over_white(Rgba8::new(c, c, c, a));
+                let got = composite(Rgba8::new(c, 255 - c, c / 2, a), Rgb8::WHITE);
+                let want = Rgb8::new(existing(c, a), existing(255 - c, a), existing(c / 2, a));
+                assert_eq!(got, want, "c = {c}, a = {a}");
+            }
+        }
+    }
+
+    #[test]
+    fn composite_stays_between_the_pixel_and_the_material() {
+        // Every alpha, pixel channel and material channel: the result never leaves the range the
+        // two ends span (so the `as u8` can't wrap), and the ends are exact.
+        for a in 0..=255u8 {
+            for c in 0..=255u8 {
+                for m in 0..=255u8 {
+                    let got = composite(Rgba8::new(c, c, c, a), Rgb8::new(m, m, m)).r;
+                    assert!(
+                        c.min(m) <= got && got <= c.max(m),
+                        "c = {c}, m = {m}, a = {a}"
+                    );
+                    if a == 255 {
+                        assert_eq!(got, c);
+                    } else if a == 0 {
+                        assert_eq!(got, m);
+                    }
+                }
             }
         }
     }

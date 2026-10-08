@@ -89,6 +89,12 @@ extern "C" {
     pub type SuggestOutcome;
     #[wasm_bindgen(typescript_type = "Outcome<PaletteMatches>")]
     pub type NearestOutcome;
+    #[wasm_bindgen(typescript_type = "Outcome<ImageStats>")]
+    pub type ImageStatsOutcome;
+    #[wasm_bindgen(typescript_type = "Outcome<ColorCount>")]
+    pub type ColorCountOutcome;
+    #[wasm_bindgen(typescript_type = "Outcome<Rgb>")]
+    pub type RgbOutcome;
 }
 
 /// Converts an outcome to its TypeScript form, typed as `O` (one of the types above).

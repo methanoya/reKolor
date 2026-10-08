@@ -6,7 +6,9 @@ import * as Comlink from 'comlink';
 import init, {
   type ConfigPick,
   type ConfigSection,
+  type ConfigUnprinted,
   type Mapping,
+  type MaterialRange,
   type Rgb,
   type Rgba,
 } from 'rekolor-wasm';
@@ -50,18 +52,34 @@ const api = {
   ready: () => started,
   open: async (file: Blob, generation: number) =>
     transferBitmap(await withSession((s) => s.open(file, generation))),
-  colorCount: (generation: number) => withSession((s) => s.colorCount(generation)),
-  pick: (generation: number, x: number, y: number, seen?: Rgba) =>
-    withSession((s) => s.pick(generation, x, y, seen)),
+  colorCount: (generation: number, material: Rgb) =>
+    withSession((s) => s.colorCount(generation, material)),
+  pick: (generation: number, x: number, y: number, material: Rgb, seen?: Rgba) =>
+    withSession((s) => s.pick(generation, x, y, material, seen)),
+  rematch: (picks: { pixel: Rgba; matching: Rgb }[], material: Rgb) =>
+    withSession((s) => s.rematch(picks, material)),
   nearest: (color: Rgb, k?: number) => withSession((s) => s.nearest(color, k)),
-  recolor: async (generation: number, revision: number, mappings: Mapping[]) =>
-    transferBitmap(await withSession((s) => s.recolor(generation, revision, mappings))),
+  recolor: async (
+    generation: number,
+    revision: number,
+    mappings: Mapping[],
+    material: Rgb,
+    materialRanges?: MaterialRange[],
+  ) =>
+    transferBitmap(
+      await withSession((s) => s.recolor(generation, revision, mappings, material, materialRanges)),
+    ),
   encodePng: (generation: number, revision: number) =>
     withSession((s) => s.encodePng(generation, revision)),
   parseConfig: (text: string) => withSession((s) => s.parseConfig(text)),
-  resolveSection: (section: ConfigSection) => withSession((s) => s.resolveSection(section)),
-  exportConfig: (imageName: string, picks: ConfigPick[]) =>
-    withSession((s) => s.exportConfig(imageName, picks)),
+  resolveSection: (section: ConfigSection, material: Rgb) =>
+    withSession((s) => s.resolveSection(section, material)),
+  exportConfig: (
+    imageName: string,
+    material: Rgb,
+    picks: ConfigPick[],
+    unprinted?: ConfigUnprinted[],
+  ) => withSession((s) => s.exportConfig(imageName, material, picks, unprinted)),
 };
 
 export type WorkerApi = typeof api;

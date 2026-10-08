@@ -78,7 +78,7 @@ The package's `.d.ts` carries the whole contract. Usage from TypeScript (in the 
 a Web Worker, T7):
 
 ```ts
-import init, { Palette, SourceImage, parseConfig, serializeConfig } from 'rekolor-wasm';
+import init, { Palette, SourceImage, composite, parseConfig, serializeConfig } from 'rekolor-wasm';
 
 await init();
 
@@ -93,22 +93,33 @@ const created = SourceImage.create(new Uint8Array(imageData.data.buffer), imageD
 if (created.status === 'error') throw new Error(created.error.message);
 const image = created.value;
 
-const pick = image.pick(x, y, seenColor, palette.value);          // x, y in image pixels
+// The material (garment or substrate) every call composites over; white = the behavior before it.
+const material = { r: 255, g: 255, b: 255 };
+
+const pick = image.pick(x, y, seenColor, material, palette.value); // x, y in image pixels
 if (pick.status === 'ok' && pick.value.mismatch) console.warn('coordinate mapping?', pick.value.mismatch);
 
 const out = new ImageData(image.width, image.height);
-const result = image.recolor({ mappings }, new Uint8Array(out.data.buffer)); // writes into `out`
+const result = image.recolor({ mappings, material }, new Uint8Array(out.data.buffer)); // writes into `out`
+// Colors left unprinted (optional): no ink, transparent in the output, so the material shows.
+const ranges = [{ pixel: { ...material, a: 255 }, deltaE: 10 }];  // the material's own color
+image.recolor({ mappings, material, materialRanges: ranges }, new Uint8Array(out.data.buffer));
+const matching = composite({ r: 203, g: 0, b: 0, a: 100 }, material); // a pixel as recolor sees it
 
 image.free(); // or `using` / Symbol.dispose
 
 // Palette configs (*.palettes.toml, the golden-set format), read and written by `rekolor-config`:
-const parsed = parseConfig(tomlText);                         // Outcome<{ sections: [{ size, picks }] }>
-const picks = palette.value.resolveSection(section);          // inks must exist; matching colors from Rust
-const text = serializeConfig({ imageName: 'tiger.png', picks: [{ rgba, ink: 'Pantone 1595' }] });
+const parsed = parseConfig(tomlText);    // Outcome<{ material, unprinted, sections: [{ size, picks }] }>
+const picks = palette.value.resolveSection(section, parsed.value.material); // matching colors from Rust
+const text = serializeConfig({ imageName: 'tiger.png', material, picks: [{ rgba, ink: 'Pantone 1595' }],
+  unprinted: [{ kind: 'material', deltaE: 10 }, { kind: 'color', rgba, deltaE: 12.5 }] });
 ```
 
-`SourceImage.colorCount()` is the bounded color count (2 MiB, whatever the image); `recolor` accepts
-at most 256 mappings (`tooManyMappings`), the palette-config limit.
+The material is a required argument everywhere it is used (`pick`, `recolor`, `colorCount`,
+`analyze`, `resolveSection`, `serializeConfig`): there is no hidden white default at the boundary.
+`SourceImage.colorCount(material)` is the bounded color count (2 MiB, whatever the image); `recolor`
+accepts at most 256 mappings and 256 material ranges (`tooManyMappings`), the palette-config limit,
+and a range's `deltaE` from 0 to 100 (`invalidInput` otherwise).
 
 The `palettes.toml` support adds the TOML parser to the WASM file: about 306 KB (131 KB gzipped),
 up from 126 KB (56 KB gzipped) before.
@@ -124,12 +135,22 @@ cargo build --release -p rekolor-cli                 # → target/release/rekolo
 ```
 
 ```sh
-rekolor recolor <input> -o <out.png> --config <name.palettes.toml> --size <N>
-rekolor recolor <input> -o <out.png> --pick "255,184,0=Pantone 1235" [--pick …]
-rekolor analyze <input>
-rekolor palettes generate <dir> [--force]   # <name>.palettes.toml next to every image
+rekolor recolor <input> -o <out.png> --config <name.palettes.toml> --size <N> [--material R,G,B]
+rekolor recolor <input> -o <out.png> --pick "255,184,0=Pantone 1235" [--pick …] [--material R,G,B]
+                [--unprinted R,G,B[,A]=ΔE | material=ΔE …]
+rekolor analyze <input> [--material R,G,B]
+rekolor palettes generate <dir> [--force] [--material R,G,B]   # <name>.palettes.toml next to every image
 rekolor golden update <dir>                 # <name>-out-<size>.png from each config
 ```
+
+- `--material R,G,B`: the material color the image is composited over (the garment or substrate).
+  Default white; with `--config`, the config's `material`, which an explicit `--material` overrides
+  (the config's inks stay as written). `palettes generate` matches on it and writes it into each
+  config, with the material's own color as an unprinted entry (ΔE 10, as the app does when a material
+  is chosen); `golden update` uses each config's own.
+- `--unprinted`: a color left unprinted, transparent in the output: `R,G,B[,A]=ΔE`, or
+  `material=ΔE` for the material's own color. Repeatable; only with `--pick` (with `--config`, the
+  config's are used). ΔE from 0 to 100.
 
 - `--palette <path>` on every command; by default `palettes/pantone.json` in the current directory
   or the nearest parent that has it.
@@ -142,7 +163,12 @@ rekolor golden update <dir>                 # <name>-out-<size>.png from each co
 Every image in `../samples/**` has, next to it:
 
 - `<name>.palettes.toml`: picks for 3, 7 and 16 inks (`{ rgba = [r, g, b, a], ink = "<name>" }`).
-  "Size N" means up to N distinct inks. The first version was generated by
+  "Size N" means up to N distinct inks. A top-level `material = [r, g, b]` (before the first
+  `[[palette]]`) is the material the picks are composited over; it is always written, and a file
+  without it is read as white (the current golden configs have none). A top-level `unprinted` list
+  holds the colors left unprinted, for every size: `{ rgba = [r, g, b, a], delta_e = 10 }` or
+  `{ material = true, delta_e = 10 }` (the material's own color, whatever it is); always written
+  (`unprinted = []` for none), none when absent, ΔE 0–100, at most 256, one material entry. The first version was generated by
   `rekolor palettes generate` (predominant, mutually most different colors: see
   `crates/cli/src/generate.rs`); since then the file is the source of truth and may be hand-edited.
 - `<name>-out-{3,7,16}.png`: the reviewed outputs.
@@ -237,6 +263,19 @@ The engine reproduces the existing recolor behavior (R9): nearest-ink matching, 
 white, opaque output, earlier mapping wins ties. The behavior decisions (`.agents/behavior-issues/`,
 local) kept those; changes so far:
 
+- **Material color (`.agents/material-color/`):** compositing is over a chosen material color instead
+  of always white: per channel `(a·c + (255 − a)·m) / 255`, truncating, on the stored sRGB values.
+  Over white this is exactly the earlier formula, so no baseline, suggestion or golden output
+  changed. `pick`, `recolor`, `analyze`/`color_count`, config resolving and the generator take the
+  material.
+- **Colors left unprinted (material-color U1, U8):** `recolor_with_ranges` takes material ranges, each
+  a stored pixel and a ΔE. A pixel whose composited color is within a range's ΔE (CIEDE2000) of the
+  range's pixel composited over the material takes no ink and is **transparent** (`[0, 0, 0, 0]`) in
+  the output, so the material shows through; `RecolorStats::unprinted` counts them. Ranges are
+  checked before the mappings, so they win over an exact pick. With no ranges the output is exactly
+  `recolor`'s (fully opaque), so no baseline or golden output changed. Configs carry them as
+  `unprinted` (see "Golden set"); the CLI's `recolor` and `golden update` use them.
+
 - **I5:** `Palette::suggest` is the plain nearest entry (CIEDE2000, ties to the earlier entry). The
   2023 preference for real inks over "Pure White/Black (non-palette)" was dropped; on the snapshot's
   5,096 colors this changed 6 suggestions, all near-black or near-white. The recolor algorithm didn't
@@ -252,11 +291,11 @@ local) kept those; changes so far:
   later picks.
 
 - **I8 (contract, no change):** with no mappings, `recolor` returns the composited copy (the image as
-  it looks on white); with one mapping, every pixel takes that ink. Tested in `core`, WASM and the TS
+  it looks on the material, white by default); with one mapping, every pixel takes that ink. Tested in `core`, WASM and the TS
   contract.
 
-- **I4:** `analyze` reports `colors`, the number of distinct colors after compositing over white
-  (what `recolor` matches), instead of the old RGB count that ignored alpha; `rgbaColors` stays. In the
+- **I4:** `analyze` reports `colors`, the number of distinct colors after compositing over the
+  material (what `recolor` matches), instead of the old RGB count that ignored alpha; `rgbaColors` stays. In the
   snapshot this changed the 4 fixtures with transparency (e.g. `transparent`: 256 → 1).
 
 - **I7 (documented, no change):** palette file order decides ties between entries with the same color
