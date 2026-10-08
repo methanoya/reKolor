@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ConfigSection, ImageStats, Rgba } from 'rekolor-wasm';
+  import type { ConfigSection, Rgba } from 'rekolor-wasm';
   import { onDestroy } from 'svelte';
   import ImageView from './components/ImageView.svelte';
   import PickList from './components/PickList.svelte';
@@ -9,6 +9,7 @@
   import { LIMITS } from './lib/limits';
   import type { AppOutcome } from './lib/outcome';
   import { mappings, sameRgb, type PickEntry } from './lib/picks';
+  import { Serial } from './lib/serial';
   import { fit, resize, zoomAt, type Size, type View } from './lib/view';
 
   // ── Engine ───────────────────────────────────────────────────────────────────────────────────
@@ -36,13 +37,18 @@
   void start();
 
   // ── Image state ──────────────────────────────────────────────────────────────────────────────
-  /** Incremented per opened image; results for older generations are ignored. */
+  /** Incremented per open attempt (the worker requires each to be newer than the last). */
+  let requested = 0;
+  /**
+   * The generation of the image that is open, set only when an open succeeds, so a failed
+   * replacement keeps the previous image usable (review fix). Results for others are ignored.
+   */
   let generation = 0;
   /** Incremented per pick change; only the current revision's result is shown or downloaded. */
   let revision = 0;
   let file = $state<{ name: string; size: number } | undefined>();
   let image = $state<Size | undefined>();
-  let stats = $state<ImageStats | undefined>();
+  let colors = $state<number | undefined>();
   let original = $state.raw<ImageBitmap | undefined>();
   let result = $state.raw<ImageBitmap | undefined>();
   let resultRevision = $state(-1);
@@ -50,18 +56,24 @@
   let recoloring = $state(false);
   let picks = $state<PickEntry[]>([]);
   let nextPickId = 1;
+  /** Pick-list changes run one at a time, in the order of the user's actions (review fix). */
+  const mutations = new Serial();
 
   let view = $state<View>({ scale: 1, x: 0, y: 0 });
   let viewport: Size = { width: 0, height: 0 };
 
+  /** After a worker restart: nothing is open, nothing is running. */
   function resetImage() {
-    generation++;
+    generation = 0;
+    recolorer.cancel();
+    opening = false;
+    recoloring = false;
     original?.close();
     result?.close();
     original = undefined;
     result = undefined;
     image = undefined;
-    stats = undefined;
+    colors = undefined;
     file = undefined;
     picks = [];
     resultRevision = -1;
@@ -69,13 +81,13 @@
 
   async function openFile(f: File) {
     if (!ready) return;
-    const gen = ++generation;
+    const gen = ++requested;
     opening = true;
     error = undefined;
     status = `Opening ${f.name}…`;
     const opened = await client.call((api) => api.open(f, gen));
-    if (gen !== generation) {
-      // A newer image was opened meanwhile.
+    if (gen !== requested) {
+      // A newer open was started meanwhile (or the worker restarted); it owns `opening`.
       if (opened.status === 'ok') opened.value.bitmap.close();
       return;
     }
@@ -87,6 +99,7 @@
       }
       return;
     }
+    generation = gen;
     original?.close();
     result?.close();
     original = opened.value.bitmap;
@@ -94,64 +107,81 @@
     resultRevision = -1;
     image = { width: opened.value.width, height: opened.value.height };
     file = { name: f.name, size: f.size };
-    stats = undefined;
+    colors = undefined;
     picks = [];
     view = fit(image, viewport);
     status = 'Click a color in the original to pick it.';
     requestRecolor();
-    const analyzed = await client.call((api) => api.analyze(gen));
-    if (gen === generation && analyzed.status === 'ok') stats = analyzed.value;
+    const counted = await client.call((api) => api.colorCount(gen));
+    if (gen === generation && counted.status === 'ok') colors = counted.value;
   }
 
   // ── Picks ────────────────────────────────────────────────────────────────────────────────────
-  async function pickAt(x: number, y: number, seen: Rgba | undefined) {
+  function pickAt(x: number, y: number, seen: Rgba | undefined) {
     const gen = generation;
-    const picked = await client.call((api) => api.pick(gen, x, y, seen));
-    if (gen !== generation) return;
-    if (picked.status === 'error') {
-      error = picked.error.message;
-      return;
-    }
-    const { pixel, matching, suggestion, mismatch } = picked.value;
-    if (picks.some((p) => sameRgb(p.matching, matching))) {
-      status = `That color (${pixel.r}, ${pixel.g}, ${pixel.b}) is already picked.`;
-      return;
-    }
-    const nearest = await client.call((api) => api.nearest(matching, ALTERNATIVES));
-    if (gen !== generation) return;
-    const alternatives = nearest.status === 'ok' ? nearest.value : [suggestion];
-    picks = [
-      ...picks,
-      {
-        id: nextPickId++,
-        pixel,
-        matching,
-        ink: suggestion,
-        alternatives,
-        at: { x, y },
-        ...(mismatch ? { mismatch } : {}),
-      },
-    ];
-    status = `Picked (${pixel.r}, ${pixel.g}, ${pixel.b}) → ${suggestion.name}`;
-    requestRecolor();
+    void mutations.run(async () => {
+      if (gen !== generation) return;
+      if (picks.length >= LIMITS.picks) {
+        status = `At most ${LIMITS.picks} picks.`;
+        return;
+      }
+      const picked = await client.call((api) => api.pick(gen, x, y, seen));
+      if (gen !== generation) return;
+      if (picked.status === 'error') {
+        error = picked.error.message;
+        return;
+      }
+      const { pixel, matching, suggestion, mismatch } = picked.value;
+      if (picks.some((p) => sameRgb(p.matching, matching))) {
+        status = `That color (${pixel.r}, ${pixel.g}, ${pixel.b}) is already picked.`;
+        return;
+      }
+      const nearest = await client.call((api) => api.nearest(matching, ALTERNATIVES));
+      if (gen !== generation) return;
+      const alternatives = nearest.status === 'ok' ? nearest.value : [suggestion];
+      picks = [
+        ...picks,
+        {
+          id: nextPickId++,
+          pixel,
+          matching,
+          ink: suggestion,
+          alternatives,
+          at: { x, y },
+          ...(mismatch ? { mismatch } : {}),
+        },
+      ];
+      status = `Picked (${pixel.r}, ${pixel.g}, ${pixel.b}) → ${suggestion.name}`;
+      requestRecolor();
+    });
   }
 
-  function changeInk(id: number, index: number) {
-    picks = picks.map((p) =>
-      p.id === id && p.alternatives[index] ? { ...p, ink: p.alternatives[index] } : p,
-    );
-    requestRecolor();
+  /** Queues a synchronous pick-list change behind any pending one. */
+  function mutate(change: () => void) {
+    const gen = generation;
+    void mutations.run(() => {
+      if (gen !== generation) return;
+      change();
+      requestRecolor();
+    });
   }
 
-  function removePick(id: number) {
-    picks = picks.filter((p) => p.id !== id);
-    requestRecolor();
-  }
+  const changeInk = (id: number, index: number) =>
+    mutate(() => {
+      picks = picks.map((p) =>
+        p.id === id && p.alternatives[index] ? { ...p, ink: p.alternatives[index] } : p,
+      );
+    });
 
-  function clearPicks() {
-    picks = [];
-    requestRecolor();
-  }
+  const removePick = (id: number) =>
+    mutate(() => {
+      picks = picks.filter((p) => p.id !== id);
+    });
+
+  const clearPicks = () =>
+    mutate(() => {
+      picks = [];
+    });
 
   // ── Palette configs (W10 v): import replaces the picks only after everything validated ──────────
   let configInput: HTMLInputElement;
@@ -159,7 +189,7 @@
   let configSections = $state<ConfigSection[]>([]);
   let configName = $state('');
 
-  async function onconfigchosen(e: Event & { currentTarget: HTMLInputElement }) {
+  function onconfigchosen(e: Event & { currentTarget: HTMLInputElement }) {
     const f = e.currentTarget.files?.[0];
     e.currentTarget.value = '';
     if (!f) return;
@@ -167,35 +197,47 @@
       error = `${f.name}: the config is larger than ${LIMITS.configBytes / 1024} KB.`;
       return;
     }
-    const parsed = await client.call(async (api) => api.parseConfig(await f.text()));
-    if (parsed.status === 'error') {
-      error = `${f.name}: ${parsed.error.message}`;
-      return;
-    }
-    const sections = parsed.value.sections;
-    if (sections.length === 0) {
-      error = `${f.name}: the config has no palettes.`;
-    } else if (sections.length === 1) {
-      await importSection(sections[0]!, f.name);
-    } else {
-      configSections = sections;
-      configName = f.name;
-      sizeDialog.showModal();
-    }
+    const gen = generation;
+    // Queued like a pick, so imports and picks apply in the order they were made.
+    void mutations.run(async () => {
+      const parsed = await client.call(async (api) => api.parseConfig(await f.text()));
+      if (gen !== generation) return;
+      if (parsed.status === 'error') {
+        error = `${f.name}: ${parsed.error.message}`;
+        return;
+      }
+      const sections = parsed.value.sections;
+      if (sections.length === 0) {
+        error = `${f.name}: the config has no palettes.`;
+      } else if (sections.length === 1) {
+        await applySection(sections[0]!, f.name, gen);
+      } else {
+        // The choice in the dialog is the next action; it queues the import then.
+        configSections = sections;
+        configName = f.name;
+        sizeDialog.showModal();
+      }
+    });
   }
 
-  async function importSection(section: ConfigSection, name: string) {
-    sizeDialog?.close();
+  function chooseSection(section: ConfigSection) {
+    sizeDialog.close();
     const gen = generation;
-    // Svelte state is a proxy, which can't be posted to the worker: send a plain copy.
+    // Svelte state is a proxy, which can't be posted to the worker: keep a plain copy.
     const plain = $state.snapshot(section);
-    const resolved = await client.call((api) => api.resolveSection(plain));
+    const name = configName;
+    void mutations.run(() => applySection(plain, name, gen));
+  }
+
+  /** Resolves a section and replaces the picks in one step (runs inside `mutations`). */
+  async function applySection(section: ConfigSection, name: string, gen: number) {
+    if (gen !== generation) return;
+    const resolved = await client.call((api) => api.resolveSection(section));
     if (gen !== generation) return;
     if (resolved.status === 'error') {
       error = `${name}: ${resolved.error.message}`;
       return;
     }
-    // Every pick resolved: replace the list in one step, keeping the config's order.
     picks = resolved.value.map((p) => ({
       id: nextPickId++,
       pixel: p.pixel,
@@ -209,9 +251,10 @@
 
   async function exportPicks() {
     if (!file) return;
+    const name = file.name;
     const exported = await client.call((api) =>
       api.exportConfig(
-        file!.name,
+        name,
         picks.map((p) => ({ rgba: $state.snapshot(p.pixel), ink: p.ink.name })),
       ),
     );
@@ -219,12 +262,7 @@
       error = exported.error.message;
       return;
     }
-    const url = URL.createObjectURL(new Blob([exported.value], { type: 'application/toml' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${file.name.replace(/\.[^.]+$/, '')}.palettes.toml`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    save(new Blob([exported.value], { type: 'application/toml' }), `${stem(name)}.palettes.toml`);
   }
 
   // ── Live recolor (W10 vi a): one in flight, one pending; stale results dropped ─────────────────
@@ -239,7 +277,8 @@
     const outcome = await client.call((api) =>
       api.recolor(req.generation, req.revision, req.mappings),
     );
-    recoloring = recolorer.busy && !(req.generation === generation && req.revision === revision);
+    const current = req.generation === generation && req.revision === revision;
+    recoloring = recolorer.busy && !current;
     if (outcome.status === 'error') {
       if (outcome.error.kind !== 'superseded' && req.generation === generation) {
         error = outcome.error.message;
@@ -247,7 +286,7 @@
       return;
     }
     const { bitmap } = outcome.value;
-    if (req.generation === generation && req.revision === revision) {
+    if (current) {
       result?.close();
       result = bitmap;
       resultRevision = req.revision;
@@ -266,19 +305,28 @@
   // ── Download (W9 a): always the current revision at full resolution ───────────────────────────
   async function download() {
     if (!file) return;
-    await recolorer.idle();
+    // The name and image at the moment of the click; nothing is saved if either changes.
     const gen = generation;
+    const name = file.name;
+    await recolorer.idle();
     const rev = revision;
-    if (resultRevision !== rev) return;
+    if (gen !== generation || resultRevision !== rev) return;
     const png: AppOutcome<Blob> = await client.call((api) => api.encodePng(gen, rev));
+    if (gen !== generation || rev !== revision) return; // changed while encoding (review fix)
     if (png.status === 'error') {
       if (png.error.kind !== 'superseded') error = png.error.message;
       return;
     }
-    const url = URL.createObjectURL(png.value);
+    save(png.value, `${stem(name)}-rekolor.png`);
+  }
+
+  const stem = (name: string) => name.replace(/\.[^.]+$/, '');
+
+  function save(blob: Blob, name: string) {
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${file.name.replace(/\.[^.]+$/, '')}-rekolor.png`;
+    a.download = name;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
   }
@@ -387,7 +435,7 @@
     <span class="file-info" data-testid="file-info">
       {#if file && image}
         {file.name} · {megabytes(file.size)} · {image.width} × {image.height}
-        {#if stats}· {stats.colors.toLocaleString()} colors{:else}· counting colors…{/if}
+        {#if colors !== undefined}· {colors.toLocaleString()} colors{:else}· counting colors…{/if}
       {:else}
         or drop / paste an image
       {/if}
@@ -452,7 +500,7 @@
     <p>{configName} has several palettes. Import one as the pick list:</p>
     <div class="sizes">
       {#each configSections as section (section.size)}
-        <button type="button" onclick={() => importSection(section, configName)}>
+        <button type="button" onclick={() => chooseSection(section)}>
           Size {section.size} · {section.picks.length} pick{section.picks.length === 1 ? '' : 's'}
         </button>
       {/each}

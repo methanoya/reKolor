@@ -84,4 +84,66 @@ describe('reKolor app', () => {
       .element(screen.getByTestId('status'))
       .toMatchTextContent('Imported 2 picks (size 2)');
   });
+
+  test('a failed replacement keeps the previous image usable (review fix)', async () => {
+    const screen = await render(App);
+    await expect.element(screen.getByText(/Engine ready/)).toBeVisible();
+    const input = screen.container.querySelector<HTMLInputElement>('#file')!;
+    await userEvent.upload(page.elementLocator(input), await fixtureFile('opaque'));
+    await expect
+      .element(screen.getByText('No picks yet: the image as printed on white'))
+      .toBeVisible();
+
+    const junk = new File([new Uint8Array([1, 2, 3, 4])], 'broken.png', { type: 'image/png' });
+    await userEvent.upload(page.elementLocator(input), junk);
+    await expect.element(screen.getByRole('alert')).toMatchTextContent('broken.png');
+    await expect
+      .element(screen.getByTestId('status'))
+      .toHaveTextContent('Kept the previous image.');
+
+    // The kept image still picks, recolors and downloads.
+    await screen.getByRole('button', { name: '1:1' }).click();
+    const canvas = screen.container.querySelector('canvas')!;
+    const box = canvas.getBoundingClientRect();
+    await userEvent.click(page.elementLocator(canvas), {
+      position: { x: box.width / 2, y: box.height / 2 },
+    });
+    await expect.element(screen.getByText('Printed with 1 ink')).toBeVisible();
+    const download = captureDownload();
+    await screen.getByTestId('download').click();
+    expect((await download).name).toBe('opaque-rekolor.png');
+  });
+
+  test('imports apply in the order they were made (review fix)', async () => {
+    const screen = await render(App);
+    await expect.element(screen.getByText(/Engine ready/)).toBeVisible();
+    const input = screen.container.querySelector<HTMLInputElement>('#file')!;
+    await userEvent.upload(page.elementLocator(input), await fixtureFile('opaque'));
+    await expect
+      .element(screen.getByText('No picks yet: the image as printed on white'))
+      .toBeVisible();
+
+    const config = (inks: string[]) =>
+      new File(
+        [
+          `[[palette]]\nsize = ${inks.length}\npicks = [\n` +
+            inks.map((ink, i) => `  { rgba = [${i}, 0, 0, 255], ink = "${ink}" },\n`).join('') +
+            ']\n',
+        ],
+        `${inks.length}.palettes.toml`,
+      );
+    const configInput = screen.container.querySelector<HTMLInputElement>('input[accept^=".toml"]')!;
+    // Two imports back to back: the second one made must be the one that stays.
+    await Promise.all([
+      userEvent.upload(
+        page.elementLocator(configInput),
+        config(['Pantone 185', 'Pantone 285', 'Pantone 300']),
+      ),
+      userEvent.upload(page.elementLocator(configInput), config(['Pantone 285'])),
+    ]);
+    await expect.element(screen.getByText('Printed with 1 ink')).toBeVisible();
+    await expect
+      .element(screen.getByTestId('status'))
+      .toHaveTextContent('Imported 1 pick (size 1) from 1.palettes.toml.');
+  });
 });

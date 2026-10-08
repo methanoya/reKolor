@@ -34,7 +34,7 @@ cargo clippy -p rekolor-wasm --target wasm32-unknown-unknown --all-targets -- -D
 
 cargo test --workspace                                          # native: unit, baseline, io, CLI end-to-end
 wasm-pack test --node crates/wasm                               # inside WASM: baseline, ΔE, boundary, errors (~15 s)
-cargo test --release -p rekolor-cli --test golden -- --ignored  # golden set (opt-in, ~40 s)
+cargo test --release -p rekolor-cli --test golden -- --ignored  # golden set (opt-in, ~5 s)
 
 # The shipped code is a release build, so the ΔE fingerprint runs in release too:
 cargo test --workspace --release
@@ -106,6 +106,9 @@ const parsed = parseConfig(tomlText);                         // Outcome<{ secti
 const picks = palette.value.resolveSection(section);          // inks must exist; matching colors from Rust
 const text = serializeConfig({ imageName: 'tiger.png', picks: [{ rgba, ink: 'Pantone 1595' }] });
 ```
+
+`SourceImage.colorCount()` is the bounded color count (2 MiB, whatever the image); `recolor` accepts
+at most 256 mappings (`tooManyMappings`), the palette-config limit.
 
 The `palettes.toml` support adds the TOML parser to the WASM file: about 306 KB (131 KB gzipped),
 up from 126 KB (56 KB gzipped) before.
@@ -213,7 +216,12 @@ re-exported.
   features are additive, so one dependency doing it would bring the difference back. The fingerprint
   tests would catch it; the `cargo tree` checks above show the resolved features.
 - **Cost:** natively, `libm` is about 2.5× slower than `std` for ΔE (the golden test went from ~15 s to
-  ~40 s). In WASM there's no extra cost: `std` already uses the musl port there.
+  ~40 s at the time). In WASM there's no extra cost: `std` already uses the musl port there.
+- **Speed and memory (no behavior change):** `recolor` remembers each composited color's answer in a
+  fixed 32 MiB table for images over 65,536 pixels, so repeated colors skip the CIEDE2000 work (golden
+  test ~40 s → ~5 s; identical output, checked by the goldens, the baseline and an equivalence test).
+  `color_count` counts distinct colors with a fixed 2 MiB bit table; `analyze` also counts RGBA
+  values, which needs memory per distinct value.
 - **Reference data:** `testdata/ciede2000-sharma.tsv` holds the 34 test pairs from G. Sharma, W. Wu and
   E. N. Dalal, "The CIEDE2000 color-difference formula: implementation notes, supplementary test data,
   and mathematical observations", *Color Research & Application* 30(1), 2005. Retrieved 2026-10-07 from

@@ -55,4 +55,14 @@ describe('Latest', () => {
     await latest.idle();
     expect(started).toEqual([1, 2]);
   });
+
+  test('cancel drops the pending request', async () => {
+    const { latest, started, finishNext } = controlled();
+    latest.request(1);
+    latest.request(2);
+    latest.cancel();
+    await finishNext();
+    expect(started).toEqual([1]);
+    expect(latest.busy).toBe(false);
+  });
 });

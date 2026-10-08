@@ -642,3 +642,31 @@ fn bad_configs_are_invalid_config_errors() {
         ErrorKind::InvalidConfig
     );
 }
+
+#[wasm_bindgen_test]
+fn color_count_matches_analyze_and_mappings_are_capped() {
+    let fixture = generator::fixture("noise");
+    let image =
+        SourceImage::from_rgba(fixture.rgba.clone(), fixture.width, fixture.height).unwrap();
+    let stats: ImageStats = image.analyze().to_rust().unwrap();
+    assert_eq!(image.color_count(), stats.colors);
+
+    let mut out = vec![0u8; fixture.rgba.len()];
+    let mapping = |i: u32| Mapping {
+        source: rgb([i as u8, (i >> 8) as u8, 1]),
+        ink: rgb([0, 0, 0]),
+    };
+    let allowed = Ts::from_rust(&RecolorRequest {
+        mappings: (0..256).map(mapping).collect(),
+    })
+    .unwrap();
+    let _: RecolorStats = ok(read(image.recolor(allowed, &mut out)));
+    let too_many = Ts::from_rust(&RecolorRequest {
+        mappings: (0..257).map(mapping).collect(),
+    })
+    .unwrap();
+    assert_eq!(
+        error_kind::<RecolorStats>(read(image.recolor(too_many, &mut out))),
+        ErrorKind::TooManyMappings
+    );
+}

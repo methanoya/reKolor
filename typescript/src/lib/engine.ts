@@ -91,9 +91,14 @@ export class Engine {
     this.#palette.free();
   }
 
-  /** Size and color counts of the current image (can take a while on large images). */
+  /** Size and color counts of the current image. Memory grows with distinct RGBA values. */
   analyze(): AppOutcome<ImageStats> {
     return this.#image ? ok(this.#image.analyze()) : err('noImage', 'no image is open');
+  }
+
+  /** Distinct colors after compositing over white, with fixed memory (what the app shows). */
+  colorCount(): AppOutcome<number> {
+    return this.#image ? ok(this.#image.colorCount()) : err('noImage', 'no image is open');
   }
 
   /** The stored pixel at (x, y), its matching color and suggested ink (R10). */

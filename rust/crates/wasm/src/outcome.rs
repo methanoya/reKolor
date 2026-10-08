@@ -37,6 +37,8 @@ pub enum ErrorKind {
     InvalidInput,
     /// A palette config can't be read, breaks a rule, or names an ink that isn't in the palette.
     InvalidConfig,
+    /// More recolor mappings than allowed (256, the palette-config limit).
+    TooManyMappings,
 }
 
 impl From<core::Error> for ErrorInfo {

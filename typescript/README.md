@@ -39,9 +39,9 @@ the Rust toolchain). Rebuild it after changing Rust code; the dev server picks i
 
 ```
 main thread (Svelte)                      worker (src/lib/worker.ts)
-  App.svelte ── EngineClient ──Comlink──►   decodeImage (codec.ts: createImageBitmap + canvas)
-  ImageView × 2 (shared zoom/pan)           Engine (engine.ts) ── rekolor-wasm: SourceImage, Palette
-  PickList                                  parseConfig / resolveSection / serializeConfig
+  App.svelte ── EngineClient ──Comlink──►   Session (session.ts: generations, revisions, guards)
+  ImageView × 2 (shared zoom/pan)             ├─ codec.ts: createImageBitmap + canvas (decode, PNG)
+  PickList                                    └─ Engine (engine.ts) ── rekolor-wasm
 ```
 
 - **Decoding** happens in the browser (R5), inside the worker: EXIF orientation applied, the color
@@ -51,8 +51,12 @@ main thread (Svelte)                      worker (src/lib/worker.ts)
   pixel, composites it over white and suggests the nearest ink (R10). At 100 % and above the color
   on screen is sent too, and Rust warns if it differs from the stored pixel.
 - **Live recolor:** at most one recolor runs and one waits (the newest picks); every result carries
-  the image generation and pick revision, and only the current one is shown or downloaded.
-- **Download** encodes the current result at full resolution (PNG, in the worker).
+  the image generation and pick revision, and only the current one is shown or downloaded. A failed
+  open keeps the previous image (its generation changes only when an open succeeds).
+- **Pick-list changes** (pick, ink change, remove, clear, import) run one at a time in the order they
+  were made. At most 256 picks (the palette-config limit).
+- **Download** encodes the current result at full resolution (PNG, in the worker); if the image or
+  picks change while it encodes, nothing is saved.
 - **Palette configs:** import/export the picks as `*.palettes.toml`, the CLI's golden-set format,
   read and written by the shared Rust crate `rekolor-config`.
 - **Errors** come back as values (`AppOutcome`); a crashed worker is restarted and the user is told.

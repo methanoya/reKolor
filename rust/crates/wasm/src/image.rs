@@ -49,9 +49,18 @@ impl SourceImage {
         self.height
     }
 
-    /// Size and color counts.
+    /// Size and color counts. Counting RGBA values needs memory per distinct value (hundreds of
+    /// MB for a large noisy image); `colorCount` is the bounded alternative.
     pub fn analyze(&self) -> Ts<ImageStats> {
         to_ts(&core::analyze(self.view()).into())
+    }
+
+    /// Distinct colors after compositing over white (`ImageStats.colors`), with fixed memory
+    /// (2 MiB) whatever the image.
+    #[wasm_bindgen(js_name = colorCount)]
+    pub fn color_count(&self) -> f64 {
+        // At most 2^24, exact as a JS number.
+        core::color_count(self.view()) as f64
     }
 
     /// Recolors the image into `out`, which must be `width × height × 4` bytes. To write
@@ -61,11 +70,22 @@ impl SourceImage {
     /// its own ink; ties go to the earlier mapping); the output is opaque. With **no mappings** the
     /// output is the composited copy (the image as it looks on white); with **one mapping** every
     /// pixel takes that ink. ΔE is bit-identical to a native build, so ties resolve the same way.
+    /// At most 256 mappings (the palette-config limit), since the work grows with each one.
     pub fn recolor(&self, request: Ts<RecolorRequest>, out: &mut [u8]) -> RecolorOutcome {
         let outcome = request
             .to_rust()
             .map_err(ErrorInfo::from)
             .and_then(|request| {
+                if request.mappings.len() > rekolor_config::MAX_PICKS {
+                    return Err(ErrorInfo {
+                        kind: crate::ErrorKind::TooManyMappings,
+                        message: format!(
+                            "{} mappings; at most {} are allowed",
+                            request.mappings.len(),
+                            rekolor_config::MAX_PICKS
+                        ),
+                    });
+                }
                 let mappings: Vec<core::Mapping> =
                     request.mappings.into_iter().map(Into::into).collect();
                 Ok(crate::RecolorStats::from(core::recolor(

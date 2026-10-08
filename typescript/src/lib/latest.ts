@@ -24,6 +24,14 @@ export class Latest<P> {
     }
   }
 
+  /**
+   * Drops the pending request (the running one can't be stopped; its result is ignored by the
+   * caller's generation check). Used when the worker restarts.
+   */
+  cancel(): void {
+    this.#pending = undefined;
+  }
+
   /** Resolves when nothing is running or pending. */
   idle(): Promise<void> {
     return this.#inFlight ? new Promise((resolve) => this.#idle.push(resolve)) : Promise.resolve();

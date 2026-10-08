@@ -99,4 +99,6 @@ describe('the engine worker', () => {
     expect(value(await client.call((api) => api.ready())).paletteSize).toBe(909);
     expect(restarts).toEqual([]);
   });
+  // The encode/open race is tested deterministically in src/lib/session.test.ts (fake codec):
+  // here the timing depends on the engine (Chromium and WebKit run the decode after the encode).
 });

@@ -9,6 +9,8 @@ export const LIMITS = {
   pixels: 24_000_000,
   /** Palette config import (W10 v). */
   configBytes: 256 * 1024,
+  /** Picks (= recolor mappings), the same limit as a config section and WASM `recolor`. */
+  picks: 256,
 } as const;
 
 /** Why an image of this size is refused, or `undefined` if it's within the limits. */

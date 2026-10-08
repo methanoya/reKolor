@@ -41,9 +41,17 @@ pub fn recolor(
     }
 
     let inks: Vec<(Mapping, Lab)> = mappings.iter().map(|&m| (m, lab(m.ink))).collect();
+    let pixel_count = input.len() / 4;
+    let mut memo =
+        (pixel_count > MEMO_MIN_PIXELS && !inks.is_empty() && inks.len() < MEMO_MAX_INKS)
+            .then(|| vec![0u16; 1 << 24]);
     let mut stats = RecolorStats::default();
     for (pixel, dst) in image.pixels().zip(out.as_chunks_mut::<4>().0) {
-        let (ink, exact) = lookup(&inks, composite_over_white(pixel));
+        let color = composite_over_white(pixel);
+        let (ink, exact) = match memo.as_deref_mut() {
+            Some(memo) => memoized(memo, &inks, color),
+            None => lookup(&inks, color),
+        };
         *dst = [ink.r, ink.g, ink.b, 255];
         if exact {
             stats.exact += 1;
@@ -62,22 +70,58 @@ pub fn recolor(
     Ok(stats)
 }
 
+/// Images above this many pixels remember each color's answer (below it, the 32 MiB table costs
+/// more than it saves).
+const MEMO_MIN_PIXELS: usize = 1 << 16;
+/// The memo stores `mapping index + 1` in 15 bits.
+const MEMO_MAX_INKS: usize = 0x7fff;
+const MEMO_EXACT: u16 = 0x8000;
+
+/// [`lookup`] remembered per composited color (one `u16` for each of the 2^24 colors: 0 = not yet
+/// computed, else the mapping index + 1, with [`MEMO_EXACT`] for exact matches). The answer depends
+/// only on the color, so results are identical; images repeat colors, so most pixels skip the
+/// CIEDE2000 work. Memory is fixed (32 MiB) whatever the image.
+fn memoized(memo: &mut [u16], inks: &[(Mapping, Lab)], color: Rgb8) -> (Rgb8, bool) {
+    let key = (usize::from(color.r) << 16) | (usize::from(color.g) << 8) | usize::from(color.b);
+    let entry = memo[key];
+    if entry != 0 {
+        return (
+            inks[usize::from(entry & !MEMO_EXACT) - 1].0.ink,
+            entry & MEMO_EXACT != 0,
+        );
+    }
+    let (index, exact) = lookup_index(inks, color);
+    // `inks` is non-empty when the memo is used, so `lookup_index` always finds an index.
+    let index = index.expect("memo is only used with mappings");
+    memo[key] = (index as u16 + 1) | if exact { MEMO_EXACT } else { 0 };
+    (inks[index].0.ink, exact)
+}
+
 /// The ink for one composited pixel color, and whether it was an exact source match.
 fn lookup(inks: &[(Mapping, Lab)], color: Rgb8) -> (Rgb8, bool) {
-    if let Some((m, _)) = inks.iter().find(|(m, _)| m.source == color) {
-        return (m.ink, true);
+    match lookup_index(inks, color) {
+        (Some(index), exact) => (inks[index].0.ink, exact),
+        // No mappings: the composited pixel passes through.
+        (None, _) => (color, false),
     }
-    // Same as before, except the pixel's Lab value is computed once instead of once per ink
-    // (it's the same value each time, so the result can't differ).
+}
+
+/// Which mapping a composited color takes: an exact source match first (first match wins), else
+/// the nearest ink (ties: the earlier mapping). `None` only when there are no mappings.
+fn lookup_index(inks: &[(Mapping, Lab)], color: Rgb8) -> (Option<usize>, bool) {
+    if let Some(index) = inks.iter().position(|(m, _)| m.source == color) {
+        return (Some(index), true);
+    }
+    // The pixel's Lab value is computed once instead of once per ink (same value each time).
     let color_lab = lab(color);
-    let mut best = (color, f32::MAX);
-    for &(m, ink_lab) in inks {
+    let mut best: Option<(usize, f32)> = None;
+    for (index, &(_, ink_lab)) in inks.iter().enumerate() {
         let distance = delta_e_2000_lab(color_lab, ink_lab);
-        if best.1 > distance {
-            best = (m.ink, distance);
+        if best.is_none_or(|(_, d)| d > distance) {
+            best = Some((index, distance));
         }
     }
-    (best.0, false)
+    (best.map(|(index, _)| index), false)
 }
 
 #[cfg(test)]
@@ -195,6 +239,60 @@ mod tests {
         assert_eq!(stats.exact, 1);
         let reversed = [mappings[1], mappings[0]];
         assert_eq!(run(&[230, 76, 60, 255], &reversed).0, [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn the_memo_gives_the_same_result_as_per_pixel_lookup() {
+        // Large enough to use the memo; colors repeat, include exact sources, transparency, and
+        // the exact ΔE tie from gray, so every lookup rule goes through the memo.
+        let (w, h) = (400u32, 300u32);
+        let mut state = 7u32;
+        let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+        for i in 0..w * h {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let px = match i % 5 {
+                0 => [128, 128, 128, 255],           // ties between the two gray-tie inks
+                1 => [230, 76, 60, 255],             // an exact source
+                2 => [9, 9, 9, (state >> 24) as u8], // all alphas
+                _ => {
+                    let v = (state >> 8) & 0x3f3f3f; // few distinct colors: lots of repeats
+                    [(v >> 16) as u8 * 4, (v >> 8) as u8 * 4, v as u8 * 4, 255]
+                }
+            };
+            rgba.extend_from_slice(&px);
+        }
+        let image = ImageRef::new(&rgba, w, h).unwrap();
+        let mappings = [
+            Mapping {
+                source: RED,
+                ink: BLUE,
+            },
+            Mapping {
+                source: Rgb8::new(1, 2, 3),
+                ink: Rgb8::new(0, 2, 227),
+            },
+            Mapping {
+                source: Rgb8::new(4, 5, 6),
+                ink: Rgb8::new(0, 4, 0),
+            },
+            Mapping {
+                source: Rgb8::new(7, 8, 9),
+                ink: Rgb8::new(252, 181, 20),
+            },
+        ];
+        assert!((w * h) as usize > MEMO_MIN_PIXELS);
+        let mut out = vec![0; rgba.len()];
+        let stats = recolor(image, &mappings, &mut out).unwrap();
+
+        let inks: Vec<(Mapping, Lab)> = mappings.iter().map(|&m| (m, lab(m.ink))).collect();
+        let mut exact = 0;
+        for (pixel, got) in image.pixels().zip(out.as_chunks::<4>().0) {
+            let (ink, is_exact) = lookup(&inks, composite_over_white(pixel));
+            assert_eq!(*got, [ink.r, ink.g, ink.b, 255], "pixel {pixel:?}");
+            exact += u64::from(is_exact);
+        }
+        assert_eq!(stats.exact, exact);
+        assert_eq!(stats.exact + stats.nearest, u64::from(w * h));
     }
 
     #[test]
