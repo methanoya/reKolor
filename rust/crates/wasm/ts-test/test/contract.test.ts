@@ -127,9 +127,27 @@ describe('SourceImage', () => {
     unwrap(red.recolor(twoInks({ r: 0, g: 0, b: 0 }, PANTONE_285), out));
     expect([...out.slice(0, 4)]).toEqual([0, 0, 0, 255]);
 
-    // Nearest-ink ties are not asserted here: native and WASM compute CIEDE2000 slightly
-    // differently (about 1e-4), so a pair of inks that ties exactly on one platform doesn't tie on
-    // the other. The exact-tie test is native-only, in `core` (`recolor` tests).
+    // Nearest-ink ties: these two inks are at exactly the same CIEDE2000 distance from gray
+    // (39.605984; the pair from the core test and the ΔE fingerprint).
+    const gray = unwrap(SourceImage.create(new Uint8Array([128, 128, 128, 255]), 1, 1));
+    const a: Rgb = { r: 0, g: 2, b: 227 };
+    const b: Rgb = { r: 0, g: 4, b: 0 };
+    const twins = unwrap(
+      Palette.create({ entries: [{ name: 'a', rgb: a }, { name: 'b', rgb: b }] }),
+    );
+    const [da, db] = unwrap(twins.nearest({ r: 128, g: 128, b: 128 }, 2)).matches;
+    expect(da!.deltaE).toBe(db!.deltaE); // precondition: an exact tie
+    const pixel = new Uint8Array(4);
+    const tie = (first: Rgb, second: Rgb): RecolorRequest => ({
+      mappings: [
+        { source: RED, ink: first },
+        { source: PANTONE_285, ink: second },
+      ],
+    });
+    unwrap(gray.recolor(tie(a, b), pixel));
+    expect([...pixel]).toEqual([0, 2, 227, 255]);
+    unwrap(gray.recolor(tie(b, a), pixel));
+    expect([...pixel]).toEqual([0, 4, 0, 255]);
   });
 
   test('errors are values, and the module keeps working after them', () => {

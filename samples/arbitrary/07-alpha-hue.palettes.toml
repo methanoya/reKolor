@@ -7,7 +7,7 @@ size = 3
 picks = [
   { rgba = [255, 0, 2, 4], ink = "Pure White (non-palette)" },
   { rgba = [224, 0, 255, 116], ink = "Pantone 2572" },
-  { rgba = [255, 0, 2, 116], ink = "Pantone 177" },
+  { rgba = [0, 224, 255, 116], ink = "Pantone 3105" },
 ]
 
 [[palette]]
@@ -15,9 +15,9 @@ size = 7
 picks = [
   { rgba = [255, 0, 2, 4], ink = "Pure White (non-palette)" },
   { rgba = [224, 0, 255, 116], ink = "Pantone 2572" },
+  { rgba = [0, 224, 255, 116], ink = "Pantone 3105" },
   { rgba = [255, 0, 2, 116], ink = "Pantone 177" },
   { rgba = [224, 255, 0, 116], ink = "Pantone 393" },
-  { rgba = [0, 224, 255, 116], ink = "Pantone 3105" },
   { rgba = [0, 24, 255, 69], ink = "Pantone 2717" },
   { rgba = [0, 255, 101, 51], ink = "Pantone 331" },
 ]
@@ -27,9 +27,9 @@ size = 16
 picks = [
   { rgba = [255, 0, 2, 4], ink = "Pure White (non-palette)" },
   { rgba = [224, 0, 255, 116], ink = "Pantone 2572" },
+  { rgba = [0, 224, 255, 116], ink = "Pantone 3105" },
   { rgba = [255, 0, 2, 116], ink = "Pantone 177" },
   { rgba = [224, 255, 0, 116], ink = "Pantone 393" },
-  { rgba = [0, 224, 255, 116], ink = "Pantone 3105" },
   { rgba = [0, 24, 255, 69], ink = "Pantone 2717" },
   { rgba = [0, 255, 101, 51], ink = "Pantone 331" },
   { rgba = [255, 0, 100, 51], ink = "Pantone 2365" },

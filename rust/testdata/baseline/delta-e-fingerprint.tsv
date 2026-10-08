@@ -1,0 +1,9 @@
+# ΔE fingerprint, format 1: 100000 SplitMix64 pairs from seed 0x5eed, FNV-1a 64 over f32 bits (see generator.rs)
+hash	0xa8395de8d116f865
+# name	from	to	delta_e_bits	delta_e
+black-white	0,0,0	255,255,255	0x42c80000	100
+red-blue	230,76,60	58,117,196	0x4234a2af	45.15887
+tie-a	128,128,128	0,2,227	0x421e6c87	39.605984
+tie-b	128,128,128	0,4,0	0x421e6c87	39.605984
+old-tie-a	128,128,128	100,140,117	0x418ce7a7	17.613111
+old-tie-b	128,128,128	101,101,135	0x418ce77d	17.613031

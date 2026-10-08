@@ -17,7 +17,7 @@ mod pick;
 mod recolor;
 
 pub use analyze::{ImageStats, analyze};
-pub use color::{Rgb8, Rgba8, composite_over_white, delta_e_2000};
+pub use color::{Lab, Rgb8, Rgba8, composite_over_white, delta_e_2000, delta_e_2000_lab, lab};
 pub use error::Error;
 pub use image::ImageRef;
 pub use palette::{NON_PALETTE_MARKER, Palette, PaletteEntry, PaletteMatch};

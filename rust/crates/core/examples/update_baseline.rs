@@ -1,7 +1,7 @@
 //! Rewrites the baseline snapshot in `rust/testdata/baseline/` from the current `rekolor-core`
 //! (P1: the baseline is "current approved behavior"; review the diff, then commit).
 //!
-//!     cargo run -p rekolor-core --example update_baseline [-- --colors-from-current]
+//!     cargo run --release -p rekolor-core --example update_baseline [-- --colors-from-current]
 //!
 //! - `recolor/<fixture>__<set>.png`: rewritten only when the decoded pixels differ, so an unchanged
 //!   engine leaves these files byte-identical.
@@ -9,6 +9,8 @@
 //! - `pantone-suggestions.tsv`: `Palette::suggest` for `generator::suggestion_colors()`, or with
 //!   `--colors-from-current` for the colors already in the file (e.g. to compare two ΔE
 //!   implementations on the same colors).
+//! - `delta-e-fingerprint.tsv`: `generator::delta_e_fingerprint` with `delta_e_2000` (R11); the
+//!   native and WASM tests must reproduce it bit for bit.
 //!
 //! Tests only read these files. The 2023 JavaScript suggestions are in git history (`c0d094c`).
 
@@ -20,7 +22,9 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 
-use rekolor_core::{ImageRef, Mapping, Palette, PaletteEntry, Rgb8, analyze, recolor};
+use rekolor_core::{
+    ImageRef, Mapping, Palette, PaletteEntry, Rgb8, analyze, delta_e_2000, recolor,
+};
 
 fn main() {
     let colors_from_current = std::env::args().any(|a| a == "--colors-from-current");
@@ -95,6 +99,14 @@ fn main() {
         writeln!(tsv, "{r}\t{g}\t{b}\t{}\t{:.6}", m.entry.name, m.delta_e).unwrap();
     }
     write_if_changed(&suggestions_path, &tsv, &rust_dir, &mut changed);
+
+    // ΔE fingerprint (R11): proves native and WASM compute bit-identical ΔE.
+    write_if_changed(
+        &baseline.join("delta-e-fingerprint.tsv"),
+        &generator::delta_e_fingerprint(|x, y| delta_e_2000(x.into(), y.into())),
+        &rust_dir,
+        &mut changed,
+    );
 
     if changed.is_empty() {
         println!("baseline unchanged");

@@ -32,8 +32,16 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo clippy -p rekolor-wasm --target wasm32-unknown-unknown --all-targets -- -D warnings
 
 cargo test --workspace                                          # native: unit, baseline, io, CLI end-to-end
-wasm-pack test --node crates/wasm                               # inside WASM: baseline, boundary, errors
-cargo test --release -p rekolor-cli --test golden -- --ignored  # golden set (opt-in, ~15 s)
+wasm-pack test --node crates/wasm                               # inside WASM: baseline, ΔE, boundary, errors (~15 s)
+cargo test --release -p rekolor-cli --test golden -- --ignored  # golden set (opt-in, ~40 s)
+
+# The shipped code is a release build, so the ΔE fingerprint runs in release too:
+cargo test --workspace --release
+wasm-pack test --node --release crates/wasm
+
+# `palette` must resolve only `libm`, never `std` (see "Color math"):
+cargo tree -e features -i palette_math
+cargo tree -e features -i palette_math --target wasm32-unknown-unknown
 ```
 
 TypeScript contract test (types and runtime behavior of the built package, as an app sees it):
@@ -47,10 +55,11 @@ npm test                                             # tsc --noEmit, then vitest
 
 | Suite | Where | What it proves |
 |---|---|---|
-| core unit tests | `crates/core/src/*` | validation, errors, compositing, matching, ties, palette rule, pick |
+| core unit tests | `crates/core/src/*` | validation, errors, compositing, matching, ties, palette rule, pick, ΔE against the Sharma reference data |
 | baseline | `crates/core/tests/baseline.rs` | `core` matches the baseline snapshot pixel for pixel |
 | suggestions | `crates/core/tests/suggestions.rs` | Pantone suggestions match the snapshot exactly (5,096 distinct colors) |
-| WASM | `crates/wasm/tests/node.rs` | the baseline inside WASM (native = WASM), malformed input → error values, lengths, factories, pick |
+| fingerprint | `crates/core/tests/fingerprint.rs` | ΔE reproduces the recorded fingerprint bit for bit |
+| WASM | `crates/wasm/tests/node.rs` | the baseline inside WASM, the same ΔE fingerprint, Sharma data and suggestion snapshot (native = WASM, bit for bit), exact ties, malformed input → error values, lengths, factories, pick |
 | contract | `crates/wasm/ts-test/` | the generated `.d.ts` (camelCase, `Outcome` narrowing, typed arrays) and runtime behavior from TypeScript |
 | io | `crates/io/tests/io.rs` | lossless PNG round trip, 16-bit/grayscale, ICC and EXIF warnings, typed errors, all samples decode |
 | CLI | `crates/cli/src/*`, `crates/cli/tests/cli.rs` | configs, generator rules, discovery; the real binary end to end |
@@ -143,8 +152,8 @@ git diff --stat ../samples                        # review the changed images, t
 read it; after an intentional change, regenerate it and review the diff:
 
 ```sh
-cargo run -p rekolor-core --example update_baseline                          # rewrite what changed
-cargo run -p rekolor-core --example update_baseline -- --colors-from-current # same, keeping the suggestion colors
+cargo run --release -p rekolor-core --example update_baseline                          # rewrite what changed
+cargo run --release -p rekolor-core --example update_baseline -- --colors-from-current # same, keeping the suggestion colors
 git diff --stat testdata/baseline                                            # review, then commit
 ```
 
@@ -157,6 +166,8 @@ only when their decoded pixels differ.
 | `testdata/baseline/recolor/<fixture>__<mapping set>.png` | `recolor` for every fixture × mapping set. Compared as **decoded pixels** (X2). |
 | `testdata/baseline/image-info.tsv` | `analyze` for every fixture. |
 | `testdata/baseline/pantone-suggestions.tsv` | `Palette::suggest` for the suggestion colors, with ΔE. Compared exactly. |
+| `testdata/baseline/delta-e-fingerprint.tsv` | ΔE fingerprint (R11): a hash over the `f32` bits of ΔE for 100,000 generated color pairs, plus exact values for a few pairs. Native and WASM tests must reproduce it bit for bit. |
+| `testdata/ciede2000-sharma.tsv` | CIEDE2000 reference data (not generated; see "Color math"). |
 
 ### History
 
@@ -170,6 +181,35 @@ only when their decoded pixels differ.
   The Rust suggestions matched all 5,096 by name; ΔE differed by at most 0.005 (f32 vs f64). That
   file is in git history; the snapshot now holds the Rust suggestions, for a new color set (the old one
   repeated after 256 of its 1,000 pseudo-random colors).
+
+## Color math (R11)
+
+Lab conversion and CIEDE2000 come from the [`palette`](https://crates.io/crates/palette) crate
+(0.7.7), in `f32`. `core` exposes `Lab` (`palette::Lab<D65, f32>`), `lab(Rgb8)` (from encoded sRGB) and
+`delta_e_2000_lab(Lab, Lab)`, beside `delta_e_2000(Rgb8, Rgb8)`; the `palette` crate itself isn't
+re-exported.
+
+- **Same results on every target.** `palette` is built with `default-features = false, features =
+  ["libm"]`, so its float functions (`powf`, `atan2`, `sin`, `cos`, `exp`, …) are the pure-Rust `libm`
+  crate everywhere. With the default `std` feature they'd come from the platform's math library natively
+  (Apple's libm on macOS) but from Rust's bundled musl port in WASM, and ΔE differed by about 1e-4 ΔE
+  between the CLI and the browser. **Tested scope:** the fingerprint covers ΔE between Lab values
+  converted from 8-bit sRGB colors (`delta_e_2000`, everything `recolor` and the palette use).
+  `delta_e_2000_lab` on other Lab values (e.g. out of the sRGB gamut) uses the same code but isn't
+  checked bit for bit; the Sharma pairs check it within `1e-4` on each target. **Don't enable
+  `palette/std` anywhere in the workspace:** Cargo
+  features are additive, so one dependency doing it would bring the difference back. The fingerprint
+  tests would catch it; the `cargo tree` checks above show the resolved features.
+- **Cost:** natively, `libm` is about 2.5× slower than `std` for ΔE (the golden test went from ~15 s to
+  ~40 s). In WASM there's no extra cost: `std` already uses the musl port there.
+- **Reference data:** `testdata/ciede2000-sharma.tsv` holds the 34 test pairs from G. Sharma, W. Wu and
+  E. N. Dalal, "The CIEDE2000 color-difference formula: implementation notes, supplementary test data,
+  and mathematical observations", *Color Research & Application* 30(1), 2005. Retrieved 2026-10-07 from
+  <https://hajim.rochester.edu/ece/sites/gsharma/ciede2000/dataNprograms/ciede2000testdata.txt>; the
+  values are unchanged, tab-separated as published, with a `#` header line added (34 rows). Native and
+  WASM tests check every pair within `1e-4` (the reference has 4 decimals). The previous implementation
+  (`lab` + `deltae`) passed them too; its ΔE differed from `palette`'s by up to 0.001 because of the
+  sRGB→Lab conversion (up to ~0.005 per L/a/b channel).
 
 ## Behavior
 
@@ -205,10 +245,17 @@ local) kept those; changes so far:
 - **I9 (documented, no change):** when a pixel is equally near to two mappings (or matches two exactly),
   the earlier mapping wins.
 
-**Native vs WASM:** CIEDE2000 values differ slightly between native and WASM builds (about 1e-4 ΔE,
-measured), so a pixel whose two nearest inks are within about 1e-3 ΔE can get a different ink in the
-browser than in the CLI and goldens. The baseline and the WASM suite contain no such near-ties; the
-exact-tie test is native-only.
+- **R11 (`palette` crate, see "Color math"):** no suggestion name changed; ΔE values in the snapshot
+  moved by at most 0.001. 5 pixels changed in 3 recolor baseline PNGs. With the configs unchanged, 25 of
+  57 golden outputs changed, 1,244 pixels in total, at near-ties (largest: `icon-calendar-out-3` 0.13 %,
+  `05-mae-jemison-out-3` 0.08 %). The owner then chose to regenerate the configs (D7 b): only
+  `07-alpha-hue` changed, because its farthest-point picks had a near-tie. At size 3 the third pick is now
+  `[0,224,255,116]` / Pantone 3105 instead of `[255,0,2,116]` / Pantone 177, which changes 31.5 % of
+  `07-alpha-hue-out-3`. Sizes 7 and 16 only reordered their picks: size 7's output is unchanged, and size
+  16's 26 changed pixels come from the ΔE switch (counted in the 1,244), not from the reordering.
+
+**Native vs WASM:** since R11, ΔE is bit-identical in native and WASM builds, so ties and near-ties
+resolve the same way in the browser as in the CLI and goldens (see "Color math" above).
 
 Each change updates the baseline snapshot (and, if pixels move, the goldens) in the same commit, so its
 effect is a reviewed diff.

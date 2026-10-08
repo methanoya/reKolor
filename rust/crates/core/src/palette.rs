@@ -1,6 +1,4 @@
-use deltae::LabValue;
-
-use crate::color::{delta, lab};
+use crate::color::{Lab, delta_e_2000_lab, lab};
 use crate::{Error, Rgb8};
 
 /// Entries whose name contains this are not real inks (the 2023 list has
@@ -42,7 +40,7 @@ pub struct PaletteMatch<'a> {
 #[derive(Debug, Clone)]
 pub struct Palette {
     entries: Vec<PaletteEntry>,
-    labs: Vec<LabValue>,
+    labs: Vec<Lab>,
 }
 
 impl Palette {
@@ -84,7 +82,7 @@ impl Palette {
             .map(move |(index, (entry, &entry_lab))| PaletteMatch {
                 index,
                 entry,
-                delta_e: delta(color_lab, entry_lab),
+                delta_e: delta_e_2000_lab(color_lab, entry_lab),
             })
     }
 }

@@ -1,7 +1,7 @@
 //! `core` must match the baseline snapshot in `testdata/baseline/` pixel for pixel (P1: current
 //! approved behavior; first recorded from the 2023 crate at commit `c0d094c`). Inputs come from
-//! `testdata/generator.rs`. After an intentional change: `cargo run -p rekolor-core --example
-//! update_baseline`, review the diff, commit.
+//! `testdata/generator.rs`. After an intentional change:
+//! `cargo run --release -p rekolor-core --example update_baseline`, review the diff, commit.
 
 #[path = "../../../testdata/generator.rs"]
 mod generator;

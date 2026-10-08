@@ -1,6 +1,6 @@
 //! The Pantone suggestion must match the snapshot in `testdata/baseline/pantone-suggestions.tsv`
 //! exactly (P1: the baseline is current approved behavior; update it with
-//! `cargo run -p rekolor-core --example update_baseline` and review the diff).
+//! `cargo run --release -p rekolor-core --example update_baseline` and review the diff).
 //!
 //! History: until behavior step 1 this file held the 2023 JavaScript suggestions (`color-diff`,
 //! commit `c0d094c`); the Rust suggestions matched all 5,096 of them by name.

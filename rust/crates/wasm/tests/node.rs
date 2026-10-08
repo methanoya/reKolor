@@ -2,13 +2,15 @@
 //!
 //! Proves the interface on the WASM target: the baseline (R9) reproduced inside WASM (native
 //! and WASM float math agree), malformed input coming back as error values while the module keeps
-//! working, and buffer-length checks.
+//! working, and buffer-length checks. R11: the ΔE fingerprint, the Sharma reference data and the
+//! Pantone suggestion snapshot, all checked against the same files as the native tests.
 
 #![cfg(target_arch = "wasm32")]
 
 #[path = "../../../testdata/generator.rs"]
 mod generator;
 
+use rekolor_core::Rgb8;
 use rekolor_wasm::{
     ErrorKind, ImageStats, Mapping, Outcome, Palette, PaletteData, PaletteEntry, PaletteMatch,
     PaletteMatches, Pick, RecolorRequest, RecolorStats, Rgb, Rgba, SourceImage,
@@ -403,4 +405,90 @@ fn zero_and_one_mapping_follow_the_contract() {
     let stats: RecolorStats = ok(read(image.recolor(one, &mut out)));
     assert_eq!(out, [40, 120, 200, 255, 40, 120, 200, 255]);
     assert_eq!((stats.exact, stats.nearest), (1.0, 1.0));
+}
+
+#[wasm_bindgen_test]
+fn delta_e_matches_the_native_fingerprint() {
+    // R11: bit-identical ΔE on native and WASM. The file was recorded natively.
+    let recorded = include_str!("../../../testdata/baseline/delta-e-fingerprint.tsv");
+    let now = generator::delta_e_fingerprint(|x, y| rekolor_core::delta_e_2000(x.into(), y.into()));
+    assert_eq!(now, recorded, "WASM ΔE differs from the native fingerprint");
+}
+
+#[wasm_bindgen_test]
+fn delta_e_matches_the_sharma_reference_data() {
+    let data = include_str!("../../../testdata/ciede2000-sharma.tsv");
+    let mut pairs = 0;
+    for line in data.lines().filter(|l| !l.starts_with('#')) {
+        let v: Vec<f32> = line.split('\t').map(|x| x.parse().unwrap()).collect();
+        let x = rekolor_core::Lab::new(v[0], v[1], v[2]);
+        let y = rekolor_core::Lab::new(v[3], v[4], v[5]);
+        let actual = rekolor_core::delta_e_2000_lab(x, y);
+        assert!((actual - v[6]).abs() <= 1e-4, "{line}: got {actual}");
+        pairs += 1;
+    }
+    assert_eq!(pairs, 34);
+}
+
+#[wasm_bindgen_test]
+fn suggestions_match_the_snapshot() {
+    // Same check as the native `suggestions` test: names and ΔE to 6 decimals.
+    let json: serde_json::Value =
+        serde_json::from_str(include_str!("../../../../palettes/pantone.json")).unwrap();
+    let entries = json
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(name, value)| {
+            let c: Vec<u8> = value["rgb"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_u64().unwrap() as u8)
+                .collect();
+            rekolor_core::PaletteEntry::new(name.clone(), rekolor_core::Rgb8::new(c[0], c[1], c[2]))
+        })
+        .collect();
+    let palette = rekolor_core::Palette::new(entries).unwrap();
+    let snapshot = include_str!("../../../testdata/baseline/pantone-suggestions.tsv");
+    let mut rows = 0;
+    for line in snapshot.lines().filter(|l| !l.starts_with('#')) {
+        let cols: Vec<&str> = line.split('\t').collect();
+        let c: Vec<u8> = cols[..3].iter().map(|v| v.parse().unwrap()).collect();
+        let m = palette.suggest(rekolor_core::Rgb8::new(c[0], c[1], c[2]));
+        let actual = format!("{}\t{:.6}", m.entry.name, m.delta_e);
+        assert_eq!(actual, format!("{}\t{}", cols[3], cols[4]), "{line}");
+        rows += 1;
+    }
+    assert_eq!(rows, 5096);
+}
+
+#[wasm_bindgen_test]
+fn nearest_ink_ties_go_to_the_earlier_mapping() {
+    // I9 in WASM: the exact tie from the core test (same bits on both targets since R11).
+    let gray = SourceImage::from_rgba(vec![128, 128, 128, 255], 1, 1).unwrap();
+    let (a, b) = (rgb([0, 2, 227]), rgb([0, 4, 0]));
+    assert_eq!(
+        rekolor_core::delta_e_2000(Rgb8::new(128, 128, 128), Rgb8::new(0, 2, 227)).to_bits(),
+        rekolor_core::delta_e_2000(Rgb8::new(128, 128, 128), Rgb8::new(0, 4, 0)).to_bits(),
+        "precondition: an exact tie"
+    );
+    let mut out = [0u8; 4];
+    for (first, second, expected) in [(a, b, [0, 2, 227, 255]), (b, a, [0, 4, 0, 255])] {
+        let request = Ts::from_rust(&RecolorRequest {
+            mappings: vec![
+                Mapping {
+                    source: rgb([230, 76, 60]),
+                    ink: first,
+                },
+                Mapping {
+                    source: rgb([40, 120, 200]),
+                    ink: second,
+                },
+            ],
+        })
+        .unwrap();
+        let _: RecolorStats = ok(read(gray.recolor(request, &mut out)));
+        assert_eq!(out, expected);
+    }
 }

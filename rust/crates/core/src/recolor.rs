@@ -1,6 +1,4 @@
-use deltae::LabValue;
-
-use crate::color::{delta, lab};
+use crate::color::{Lab, delta_e_2000_lab, lab};
 use crate::{Error, ImageRef, Rgb8, composite_over_white};
 
 /// One picked color and the ink that replaces it (`from` → `to` in the 2023 UI).
@@ -27,8 +25,8 @@ pub struct RecolorStats {
 /// 4. **no mappings**: the output is the composited copy (the image as it looks on white);
 /// 5. **one mapping**: no special case, so every pixel takes that ink.
 ///
-/// CIEDE2000 is computed in `f32` with the platform's float functions, so native and WASM builds
-/// can differ by about 1e-4 ΔE: two inks that tie exactly on one platform may not tie on the other.
+/// ΔE is bit-identical on native and WASM builds ([`delta_e_2000_lab`](crate::delta_e_2000_lab)),
+/// so ties resolve the same way everywhere.
 pub fn recolor(
     image: ImageRef<'_>,
     mappings: &[Mapping],
@@ -42,7 +40,7 @@ pub fn recolor(
         });
     }
 
-    let inks: Vec<(Mapping, LabValue)> = mappings.iter().map(|&m| (m, lab(m.ink))).collect();
+    let inks: Vec<(Mapping, Lab)> = mappings.iter().map(|&m| (m, lab(m.ink))).collect();
     let mut stats = RecolorStats::default();
     for (pixel, dst) in image.pixels().zip(out.as_chunks_mut::<4>().0) {
         let (ink, exact) = lookup(&inks, composite_over_white(pixel));
@@ -65,7 +63,7 @@ pub fn recolor(
 }
 
 /// The ink for one composited pixel color, and whether it was an exact source match.
-fn lookup(inks: &[(Mapping, LabValue)], color: Rgb8) -> (Rgb8, bool) {
+fn lookup(inks: &[(Mapping, Lab)], color: Rgb8) -> (Rgb8, bool) {
     if let Some((m, _)) = inks.iter().find(|(m, _)| m.source == color) {
         return (m.ink, true);
     }
@@ -74,7 +72,7 @@ fn lookup(inks: &[(Mapping, LabValue)], color: Rgb8) -> (Rgb8, bool) {
     let color_lab = lab(color);
     let mut best = (color, f32::MAX);
     for &(m, ink_lab) in inks {
-        let distance = delta(color_lab, ink_lab);
+        let distance = delta_e_2000_lab(color_lab, ink_lab);
         if best.1 > distance {
             best = (m.ink, distance);
         }
@@ -151,12 +149,13 @@ mod tests {
 
     #[test]
     fn nearest_ink_ties_go_to_the_earlier_mapping() {
-        // Two different inks at exactly the same CIEDE2000 distance from gray (found by search;
-        // with another ΔE implementation (R11) this pair may no longer tie, see the precondition).
-        // Native-only: in WASM the two distances differ by about 3e-4, so they don't tie there.
+        // Two different inks at exactly the same CIEDE2000 distance from gray, 39.605984 (R11: the
+        // first exact tie in a search over all sRGB colors in r, g, b order). The same pair is in
+        // the ΔE fingerprint, the WASM suite and the TS contract. If the ΔE math ever changes, the
+        // precondition fails instead of testing a non-tie.
         let pixel = Rgb8::new(128, 128, 128);
-        let a = Rgb8::new(100, 140, 117);
-        let b = Rgb8::new(101, 101, 135);
+        let a = Rgb8::new(0, 2, 227);
+        let b = Rgb8::new(0, 4, 0);
         assert_eq!(
             crate::delta_e_2000(pixel, a).to_bits(),
             crate::delta_e_2000(pixel, b).to_bits(),

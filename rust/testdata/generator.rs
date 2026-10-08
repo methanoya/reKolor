@@ -262,3 +262,64 @@ fn transparent() -> Fixture {
         [(x * 16) as u8, (y * 16) as u8, 128, 0]
     })
 }
+
+/// Seed of the ΔE fingerprint corpus (R11).
+pub const FINGERPRINT_SEED: u64 = 0x5eed;
+/// Number of color pairs in the ΔE fingerprint (R11, owner answer F1 a).
+pub const FINGERPRINT_PAIRS: usize = 100_000;
+
+/// Pairs whose ΔE is recorded exactly (as `f32` bits) beside the fingerprint hash.
+pub const FINGERPRINT_EXACT: &[(&str, [u8; 3], [u8; 3])] = &[
+    ("black-white", [0, 0, 0], [255, 255, 255]),
+    ("red-blue", [230, 76, 60], [58, 117, 196]),
+    // The exact tie used by the earlier-mapping tests (core, WASM, TS contract): same bits.
+    ("tie-a", [128, 128, 128], [0, 2, 227]),
+    ("tie-b", [128, 128, 128], [0, 4, 0]),
+    // The pair that tied exactly natively before R11 (lab + deltae), but not in WASM.
+    ("old-tie-a", [128, 128, 128], [100, 140, 117]),
+    ("old-tie-b", [128, 128, 128], [101, 101, 135]),
+];
+
+/// The ΔE fingerprint file (`testdata/baseline/delta-e-fingerprint.tsv`), rendered from a ΔE
+/// function. The update command writes it; the native and WASM tests render it again with their
+/// own build and compare the text, which proves bit-identical ΔE on both targets.
+///
+/// Corpus: SplitMix64 from [`FINGERPRINT_SEED`]; each 64-bit word gives one pair, from its
+/// little-endian bytes 0–2 and 3–5; [`FINGERPRINT_PAIRS`] pairs in generation order.
+/// Hash: FNV-1a 64 (offset `0xcbf29ce484222325`, prime `0x100000001b3`) over each `f32::to_bits()`
+/// as little-endian bytes.
+pub fn delta_e_fingerprint(delta_e: impl Fn([u8; 3], [u8; 3]) -> f32) -> String {
+    let mut state = FINGERPRINT_SEED;
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for _ in 0..FINGERPRINT_PAIRS {
+        state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^= z >> 31;
+        let b = z.to_le_bytes();
+        for byte in delta_e([b[0], b[1], b[2]], [b[3], b[4], b[5]])
+            .to_bits()
+            .to_le_bytes()
+        {
+            hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    let mut out = format!(
+        "# ΔE fingerprint, format 1: {FINGERPRINT_PAIRS} SplitMix64 pairs from seed \
+         {FINGERPRINT_SEED:#x}, FNV-1a 64 over f32 bits (see generator.rs)\n\
+         hash\t{hash:#018x}\n\
+         # name\tfrom\tto\tdelta_e_bits\tdelta_e\n"
+    );
+    for &(name, from, to) in FINGERPRINT_EXACT {
+        let d = delta_e(from, to);
+        let rgb = |c: [u8; 3]| format!("{},{},{}", c[0], c[1], c[2]);
+        out.push_str(&format!(
+            "{name}\t{}\t{}\t{:#010x}\t{d}\n",
+            rgb(from),
+            rgb(to),
+            d.to_bits()
+        ));
+    }
+    out
+}
