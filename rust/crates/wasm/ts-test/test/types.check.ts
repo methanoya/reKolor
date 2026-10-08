@@ -27,10 +27,13 @@ if (outcome.status === 'ok') {
 }
 
 // Fields are camelCase on the TypeScript side (T6).
-const rgbColors: number = stats.rgbColors;
-void rgbColors;
+const colors: number = stats.colors;
+void colors;
 // @ts-expect-error
 stats.rgb_colors;
+// The old field name is gone (I4).
+// @ts-expect-error
+stats.rgbColors;
 
 // Pixel buffers are typed arrays, never plain arrays (T3).
 // @ts-expect-error

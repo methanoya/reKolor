@@ -118,11 +118,11 @@ fn analyze_reproduces_image_info() {
             vec![
                 u64::from(stats.width),
                 u64::from(stats.height),
-                stats.rgb_colors,
+                stats.colors,
                 stats.rgba_colors
             ],
             expected,
-            "{}: width, height, rgb_colors, real_colors",
+            "{}: width, height, colors, rgba_colors",
             row[0]
         );
     }

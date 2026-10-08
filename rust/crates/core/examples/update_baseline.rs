@@ -50,14 +50,14 @@ fn main() {
         }
     }
 
-    // Image info (same columns as the recorded 2023 file).
-    let mut info = String::from("# fixture\twidth\theight\trgb_colors\treal_colors\n");
+    // Image info.
+    let mut info = String::from("# fixture\twidth\theight\tcolors\trgba_colors\n");
     for fixture in generator::fixtures() {
         let s = analyze(ImageRef::new(&fixture.rgba, fixture.width, fixture.height).unwrap());
         writeln!(
             info,
             "{}\t{}\t{}\t{}\t{}",
-            fixture.name, s.width, s.height, s.rgb_colors, s.rgba_colors
+            fixture.name, s.width, s.height, s.colors, s.rgba_colors
         )
         .unwrap();
     }

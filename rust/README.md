@@ -186,5 +186,9 @@ local) kept those; changes so far:
   it looks on white); with one mapping, every pixel takes that ink. Tested in `core`, WASM and the TS
   contract.
 
+- **I4:** `analyze` reports `colors`, the number of distinct colors after compositing over white
+  (what `recolor` matches), instead of the old RGB count that ignored alpha; `rgbaColors` stays. In the
+  snapshot this changed the 4 fixtures with transparency (e.g. `transparent`: 256 → 1).
+
 Each change updates the baseline snapshot (and, if pixels move, the goldens) in the same commit, so its
 effect is a reviewed diff.

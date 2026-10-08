@@ -95,11 +95,11 @@ fn run(cli: Cli) -> Result<()> {
             let image = decode(&input)?;
             let s = analyze(image.view());
             println!(
-                "{}: {}×{}, {} RGB colors, {} RGBA colors",
+                "{}: {}×{}, {} colors (composited over white), {} RGBA colors",
                 input.display(),
                 s.width,
                 s.height,
-                s.rgb_colors,
+                s.colors,
                 s.rgba_colors
             );
             Ok(())

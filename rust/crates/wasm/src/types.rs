@@ -44,8 +44,8 @@ pub struct RecolorStats {
 pub struct ImageStats {
     pub width: u32,
     pub height: u32,
-    /// Distinct RGB values, alpha ignored.
-    pub rgb_colors: f64,
+    /// Distinct colors after compositing over white: what `recolor` matches.
+    pub colors: f64,
     /// Distinct RGBA values.
     pub rgba_colors: f64,
 }
@@ -162,7 +162,7 @@ impl From<core::ImageStats> for ImageStats {
         Self {
             width: s.width,
             height: s.height,
-            rgb_colors: s.rgb_colors as f64,
+            colors: s.colors as f64,
             rgba_colors: s.rgba_colors as f64,
         }
     }

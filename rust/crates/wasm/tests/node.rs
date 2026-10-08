@@ -155,7 +155,7 @@ fn analyze_reproduces_image_info_in_wasm() {
             vec![
                 f64::from(stats.width),
                 f64::from(stats.height),
-                stats.rgb_colors,
+                stats.colors,
                 stats.rgba_colors
             ],
             expected,

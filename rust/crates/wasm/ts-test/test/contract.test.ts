@@ -69,7 +69,8 @@ describe('SourceImage', () => {
   test('create returns a typed outcome', () => {
     const image = redAndTransparent();
     expect([image.width, image.height]).toEqual([2, 1]);
-    expect(image.analyze()).toEqual({ width: 2, height: 1, rgbColors: 2, rgbaColors: 2 });
+    // Pixel 2 is transparent, so it counts as white.
+    expect(image.analyze()).toEqual({ width: 2, height: 1, colors: 2, rgbaColors: 2 });
 
     const wrongLength = SourceImage.create(new Uint8Array(7), 2, 1);
     expect(wrongLength.status).toBe('error');
