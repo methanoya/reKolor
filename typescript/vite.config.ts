@@ -2,8 +2,8 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { defineConfig, searchForWorkspaceRoot } from 'vite';
 import { wasmWatch } from './wasm-watch.ts';
 
-// The base path is `/` by default. `vite build --mode pages` builds for GitHub Pages under `/reKolor/`
-// (W14 c: deployment itself is decided later); `REKOLOR_BASE` overrides both.
+// The base path is `/` by default. `vite build --mode pages` builds for GitHub Pages under
+// `/reKolor/`; `REKOLOR_BASE` overrides both.
 export default defineConfig(({ mode }) => ({
   base: process.env.REKOLOR_BASE ?? (mode === 'pages' ? '/reKolor/' : '/'),
   // `wasmWatch`: the dev server rebuilds the WASM package when its Rust sources change.

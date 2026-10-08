@@ -1,8 +1,8 @@
-//! Native file I/O for `rekolor-core` (R1, R3, R4, R5): decodes image files to RGBA8, encodes
-//! RGBA8 to PNG, and returns the M1 decoder-discrepancy warnings as data (R7).
+//! Native file I/O for `rekolor-core`: decodes image files to RGBA8, encodes
+//! RGBA8 to PNG, and returns the decoder-discrepancy warnings as data.
 //!
 //! Native only: never a dependency of `rekolor-wasm`. Formats: every format `image` can read
-//! with the workspace feature set (see the decisions, "Image formats").
+//! with the workspace feature set (the `image` dependency in the workspace `Cargo.toml`).
 
 use std::fmt;
 use std::io::Cursor;
@@ -30,7 +30,7 @@ pub enum Error {
     InvalidImage(#[from] rekolor_core::Error),
 }
 
-/// A decoded image: RGBA8 pixels (straight alpha, row-major) plus the M1 warnings.
+/// A decoded image: RGBA8 pixels (straight alpha, row-major) plus the decoder warnings.
 ///
 /// Only [`decode`] and [`decode_file`] create one, so its dimensions always match its buffer and
 /// [`DecodedImage::view`] can't fail. The fields are private for that reason:
@@ -65,7 +65,7 @@ impl DecodedImage {
         self.rgba
     }
 
-    /// Things this decoder may treat differently from a browser (M1).
+    /// Things this decoder may treat differently from a browser.
     pub fn warnings(&self) -> &[DecodeWarning] {
         &self.warnings
     }
@@ -77,7 +77,7 @@ impl DecodedImage {
     }
 }
 
-/// Things in a file that this decoder may treat differently from a browser (M1). The pixels are
+/// Things in a file that this decoder may treat differently from a browser. The pixels are
 /// still valid; these explain why they might not match what the app shows for the same file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecodeWarning {
@@ -120,7 +120,7 @@ pub fn decode_file(path: &Path) -> Result<DecodedImage, Error> {
 }
 
 /// Decodes an image in any readable format to RGBA8: 16-bit and grayscale images are converted,
-/// and the EXIF orientation is applied (R3). The format is detected from the content only; formats
+/// and the EXIF orientation is applied. The format is detected from the content only; formats
 /// without a signature (TGA) need [`decode_file`].
 pub fn decode(bytes: &[u8]) -> Result<DecodedImage, Error> {
     decode_with_hint(bytes, None)
@@ -144,7 +144,7 @@ fn decode_with_hint(bytes: &[u8], hint: Option<ImageFormat>) -> Result<DecodedIm
     let rgba = image.to_rgba8();
     let (width, height) = rgba.dimensions();
     let rgba = rgba.into_raw();
-    // Some decoders accept 0×N images; the core's invariants don't (review fix F2).
+    // Some decoders accept 0×N images; the core's invariants don't.
     ImageRef::new(&rgba, width, height)?;
 
     let mut warnings = Vec::new();

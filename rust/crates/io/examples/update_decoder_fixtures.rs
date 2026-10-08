@@ -1,13 +1,13 @@
-//! Writes the cross-decoder fixtures (M2) to `rust/testdata/decoders/`: encoded images with known
+//! Writes the cross-decoder fixtures to `rust/testdata/decoders/`: encoded images with known
 //! content, and how `rekolor-io` decodes them (the reference the browser decoder is compared
 //! with in `typescript/tests/browser/decoders.test.ts`).
 //!
 //!     cargo run --release -p rekolor-io --example update_decoder_fixtures
 //!
 //! For each fixture `<name>.<ext>`: `<name>.rgba` holds the decoded straight-alpha RGBA bytes, and
-//! `references.tsv` lists name, file, width, height and the M1 warnings. Everything is generated
-//! deterministically, so an unchanged encoder and decoder rewrite identical files. Tests only read
-//! these files (`crates/io/tests/decoders.rs` checks they match a fresh decode).
+//! `references.tsv` lists name, file, width, height and the decoder warnings. Everything is
+//! generated deterministically, so an unchanged encoder and decoder rewrite identical files. Tests
+//! only read these files (`crates/io/tests/decoders.rs` checks they match a fresh decode).
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -89,7 +89,7 @@ fn fixtures() -> Vec<(&'static str, String, Vec<u8>)> {
             png(&alpha_ramp(), 256, 8, None, None),
         ),
         // A valid ICC profile with red and green primaries swapped: browsers apply it, `rekolor-io`
-        // reports it and keeps the stored values (M1). Expected to differ.
+        // reports it and keeps the stored values. Expected to differ.
         (
             "icc-swapped",
             "icc-swapped.png".into(),

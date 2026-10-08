@@ -20,7 +20,7 @@ declare const image: SourceImage;
 declare const pick: Pick;
 declare const white: Rgb;
 
-// The value is only reachable after narrowing on `status` (T5).
+// The value is only reachable after narrowing on `status`.
 // @ts-expect-error
 outcome.value;
 if (outcome.status === 'ok') {
@@ -31,16 +31,16 @@ if (outcome.status === 'ok') {
   void kind;
 }
 
-// Fields are camelCase on the TypeScript side (T6).
+// Fields are camelCase on the TypeScript side.
 const colors: number = stats.colors;
 void colors;
 // @ts-expect-error
 stats.rgb_colors;
-// The old field name is gone (I4).
+// There is no `rgbColors` field.
 // @ts-expect-error
 stats.rgbColors;
 
-// Pixel buffers are typed arrays, never plain arrays (T3).
+// Pixel buffers are typed arrays, never plain arrays.
 // @ts-expect-error
 image.recolor({ mappings: [], material: white }, [0, 0, 0, 0]);
 

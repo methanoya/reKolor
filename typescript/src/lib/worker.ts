@@ -1,4 +1,4 @@
-// The Web Worker that owns the WASM engine (T7), exposed to the main thread with Comlink (W6 b).
+// The Web Worker that owns the WASM engine, exposed to the main thread with Comlink.
 // The rules (generations, revisions, guards) live in `session.ts`; this file starts the engine,
 // passes the browser codec, and transfers bitmaps instead of copying them.
 

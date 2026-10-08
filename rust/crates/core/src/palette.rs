@@ -1,7 +1,7 @@
 use crate::color::{Lab, delta_e_2000_lab, lab};
 use crate::{Error, Rgb8};
 
-/// Entries whose name contains this are not real inks (the 2023 list has
+/// Entries whose name contains this are not real inks (`palettes/pantone.json` has
 /// "Pure White (non-palette)" and "Pure Black (non-palette)").
 pub const NON_PALETTE_MARKER: &str = "non-palette";
 
@@ -36,7 +36,7 @@ pub struct PaletteMatch<'a> {
 }
 
 /// An ordered list of named colors, with Lab values computed once.
-/// The order is the file order and decides ties (issue I7).
+/// The order is the file order and decides ties.
 #[derive(Debug, Clone)]
 pub struct Palette {
     entries: Vec<PaletteEntry>,
@@ -56,9 +56,8 @@ impl Palette {
         &self.entries
     }
 
-    /// The suggested entry for a color: the nearest one by CIEDE2000, real ink or not (I5: the
-    /// 2023 preference for real inks over pure white/black was dropped). Ties go to the earlier
-    /// entry.
+    /// The suggested entry for a color: the nearest one by CIEDE2000, real ink or not (no
+    /// preference for real inks over pure white/black). Ties go to the earlier entry.
     pub fn suggest(&self, color: Rgb8) -> PaletteMatch<'_> {
         self.distances(color)
             .reduce(|best, m| if m.delta_e < best.delta_e { m } else { best })
@@ -114,8 +113,8 @@ mod tests {
 
     #[test]
     fn suggest_is_the_nearest_entry_even_when_it_is_non_palette() {
-        // I5: no preference for real inks. Pure white is the nearest entry here, but not 1.5×
-        // closer than the gray ink, so the 2023 rule would have suggested the gray.
+        // No preference for real inks: pure white is the nearest entry here, though not 1.5×
+        // closer than the gray ink.
         let p = palette(&[
             ("Pure White (non-palette)", [255, 255, 255]),
             ("Gray", [230, 230, 230]),

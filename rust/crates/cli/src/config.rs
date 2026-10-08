@@ -1,7 +1,7 @@
-//! Golden palette configs on disk: `<name>.palettes.toml` next to each sample image (X1).
+//! Golden palette configs on disk: `<name>.palettes.toml` next to each sample image.
 //!
 //! The format, its validation and the conversion to mappings live in `rekolor-config` (shared with
-//! the web app, W10 v); this module adds the CLI's file names, reading, and the golden-file header.
+//! the web app); this module adds the CLI's file names, reading, and the golden-file header.
 
 use std::path::{Path, PathBuf};
 

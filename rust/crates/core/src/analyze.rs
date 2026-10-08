@@ -8,7 +8,7 @@ pub struct ImageStats {
     pub width: u32,
     pub height: u32,
     /// Distinct colors after compositing over the material: what [`recolor`](crate::recolor)
-    /// actually matches (I4). Fully transparent pixels count as the material, whatever RGB they
+    /// actually matches. Fully transparent pixels count as the material, whatever RGB they
     /// hide.
     pub colors: u64,
     /// Distinct RGBA values, as stored.
@@ -71,7 +71,7 @@ mod tests {
     #[test]
     fn counts_composited_colors_and_rgba_separately() {
         // Opaque (1,2,3); transparent hiding (7,7,7) → white; opaque white; half-transparent
-        // (9,9,9) → (131,131,131). The old count (RGB, alpha ignored) would have been 4.
+        // (9,9,9) → (131,131,131). Counting RGB with alpha ignored would give 4.
         let buf = [1, 2, 3, 255, 7, 7, 7, 0, 255, 255, 255, 255, 9, 9, 9, 128];
         let stats = analyze(ImageRef::new(&buf, 2, 2).unwrap(), Rgb8::WHITE);
         assert_eq!(

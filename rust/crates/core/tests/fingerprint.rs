@@ -1,4 +1,4 @@
-//! ΔE fingerprint (R11): this build's ΔE must reproduce `testdata/baseline/delta-e-fingerprint.tsv`
+//! ΔE fingerprint: this build's ΔE must reproduce `testdata/baseline/delta-e-fingerprint.tsv`
 //! bit for bit. The WASM suite runs the same check, so both targets match the same file and hence
 //! each other. Update the file with
 //! `cargo run --release -p rekolor-core --example update_baseline`.

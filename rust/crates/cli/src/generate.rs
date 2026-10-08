@@ -1,5 +1,5 @@
 //! First-version palette configs: an image's predominant colors that are most different from
-//! each other, each mapped to its suggested ink, up to N distinct inks (X1).
+//! each other, each mapped to its suggested ink, up to N distinct inks.
 //!
 //! Rule (deterministic):
 //! 1. Group pixels by their matching color (composited over the material, as an interactive pick

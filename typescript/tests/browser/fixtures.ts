@@ -1,4 +1,4 @@
-// Access to the cross-decoder fixtures (M2) recorded by
+// Access to the cross-decoder fixtures recorded by
 // `cargo run --release -p rekolor-io --example update_decoder_fixtures`.
 
 import referencesTsv from '../../../rust/testdata/decoders/references.tsv?raw';

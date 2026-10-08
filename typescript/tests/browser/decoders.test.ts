@@ -1,10 +1,10 @@
-// M2: the browser's decoding (the app's codec, `createImageBitmap` + canvas) compared with
-// `rekolor-io`'s, per fixture (plan step 5):
+// The browser's decoding (the app's codec, `createImageBitmap` + canvas) compared with
+// `rekolor-io`'s, per fixture:
 // - opaque sRGB and EXIF PNG: exact size and pixels;
 // - EXIF JPEG: exact size; colors close (JPEG decoders differ slightly);
 // - alpha ramp: alpha exact, colors composited over white within ±1 (what recolor sees);
 // - ICC profile: expected to differ (the browser applies it, `rekolor-io` reports it): the size
-//   must match and the M1 warning must be recorded; the difference is logged, not asserted.
+//   must match and the decoder warning must be recorded; the difference is logged, not asserted.
 
 import { server } from 'vitest/browser';
 import { describe, expect, test } from 'vitest';
@@ -103,6 +103,8 @@ describe(`browser decoding vs rekolor-io (${server.browser})`, () => {
     let worst = 0;
     for (let i = 0; i < rust.length; i++)
       worst = Math.max(worst, Math.abs(got.rgba[i]! - rust[i]!));
-    console.info(`[M2] ${server.browser}: ICC-profiled PNG, largest channel difference ${worst}`);
+    console.info(
+      `[decoders] ${server.browser}: ICC-profiled PNG, largest channel difference ${worst}`,
+    );
   });
 });

@@ -1,19 +1,19 @@
 # reKolor, Rust part
 
-A self-contained Cargo workspace (R1, R2): the color engine, its browser interface, native file
+A self-contained Cargo workspace: the color engine, its browser interface, native file
 I/O and a command-line tool. It builds and tests on its own; the web app (`../typescript/`) consumes only
 the WASM package it produces.
 
 | Crate | What it is | Must not depend on |
 |---|---|---|
 | `crates/core` (`rekolor-core`) | Pure color logic on raw RGBA8 buffers: `recolor`, `analyze`, `Palette` (suggest, nearest), `pick` by coordinate, typed errors. No I/O, no printing. | wasm-bindgen, tsify, `image` |
-| `crates/config` (`rekolor-config`) | Palette config files (`*.palettes.toml`): parse, validate (sizes, distinct inks, limits), write, and resolve picks against a `Palette` (compositing in Rust). Shared by the CLI and the web app (W10 v). No file I/O. | `rekolor-io`, wasm-bindgen |
+| `crates/config` (`rekolor-config`) | Palette config files (`*.palettes.toml`): parse, validate (sizes, distinct inks, limits), write, and resolve picks against a `Palette` (compositing in Rust). Shared by the CLI and the web app. No file I/O. | `rekolor-io`, wasm-bindgen |
 | `crates/wasm` (`rekolor-wasm`) | Thin browser interface over `core` and `config` (wasm-bindgen + tsify). Classes `SourceImage` and `Palette`, config functions; results as `Outcome<T>` values. | `rekolor-io` (it would pull `image` into the WASM build) |
-| `crates/io` (`rekolor-io`) | Native decoding of every readable `image` format to RGBA8 (EXIF orientation applied), PNG encoding, and the decoder-discrepancy warnings (M1) as data. | — |
+| `crates/io` (`rekolor-io`) | Native decoding of every readable `image` format to RGBA8 (EXIF orientation applied), PNG encoding, and the decoder-discrepancy warnings as data. | — |
 | `crates/cli` (`rekolor-cli`, binary `rekolor`) | Command-line tool on top of `io`, `config` and `core`; also a small library (config file names and reading, palette loading, config generation, discovery) used by the golden test. | — |
 
-Shared test data lives in `testdata/` (see [Baseline snapshot](#baseline-snapshot-r9-p1)); the golden set lives in
-`../samples/` (see [Golden set](#golden-set-x1)); the palette is `../palettes/pantone.json`.
+Shared test data lives in `testdata/` (see [Baseline snapshot](#baseline-snapshot)); the golden set lives in
+`../samples/` (see [Golden set](#golden-set)); the palette is `../palettes/pantone.json`.
 
 ## Requirements
 
@@ -63,7 +63,7 @@ npm test                                             # tsc --noEmit, then vitest
 | WASM | `crates/wasm/tests/node.rs` | the baseline inside WASM, the same ΔE fingerprint, Sharma data and suggestion snapshot (native = WASM, bit for bit), exact ties, malformed input → error values, lengths, factories, pick |
 | contract | `crates/wasm/ts-test/` | the generated `.d.ts` (camelCase, `Outcome` narrowing, typed arrays) and runtime behavior from TypeScript |
 | io | `crates/io/tests/io.rs` | lossless PNG round trip, 16-bit/grayscale, ICC and EXIF warnings, typed errors, all samples decode |
-| decoder fixtures | `crates/io/tests/decoders.rs` | the cross-decoder fixtures (M2) match a fresh `rekolor-io` decode |
+| decoder fixtures | `crates/io/tests/decoders.rs` | the cross-decoder fixtures match a fresh `rekolor-io` decode |
 | config | `crates/config/src/lib.rs` | config format, round trip, escaping, limits, rules, resolving picks |
 | CLI | `crates/cli/src/*`, `crates/cli/tests/cli.rs` | configs, generator rules, discovery; the real binary end to end |
 | golden | `crates/cli/tests/golden.rs` | every sample matches its reviewed outputs (opt-in) |
@@ -75,7 +75,7 @@ wasm-pack build crates/wasm --release --target web   # → crates/wasm/pkg (igno
 ```
 
 The package's `.d.ts` carries the whole contract. Usage from TypeScript (in the app this belongs in
-a Web Worker, T7):
+a Web Worker):
 
 ```ts
 import init, { Palette, SourceImage, composite, parseConfig, serializeConfig } from 'rekolor-wasm';
@@ -121,11 +121,11 @@ The material is a required argument everywhere it is used (`pick`, `recolor`, `c
 accepts at most 256 mappings and 256 material ranges (`tooManyMappings`), the palette-config limit,
 and a range's `deltaE` from 0 to 100 (`invalidInput` otherwise).
 
-The `palettes.toml` support adds the TOML parser to the WASM file: about 306 KB (131 KB gzipped),
-up from 126 KB (56 KB gzipped) before.
+The WASM file is about 360 KB (150 KB gzipped); the TOML parser for `*.palettes.toml` is a large
+part of it.
 
-Every call that can fail on input returns `{ status: 'ok', value } | { status: 'error', error: { kind, message } }`
-(T5). Exceptions only signal programming mistakes or Rust panics, which `console_error_panic_hook`
+Every call that can fail on input returns `{ status: 'ok', value } | { status: 'error', error: { kind, message } }`.
+Exceptions only signal programming mistakes or Rust panics, which `console_error_panic_hook`
 prints to the console.
 
 ## CLI
@@ -158,7 +158,7 @@ rekolor golden update <dir>                 # <name>-out-<size>.png from each co
   applied, semi-transparent pixels) go to stderr; errors exit non-zero.
 - `log` traces go to stderr at `warn` level by default; set `RUST_LOG=debug` for more.
 
-## Golden set (X1)
+## Golden set
 
 Every image in `../samples/**` has, next to it:
 
@@ -168,16 +168,17 @@ Every image in `../samples/**` has, next to it:
   without it is read as white (the current golden configs have none). A top-level `unprinted` list
   holds the colors left unprinted, for every size: `{ rgba = [r, g, b, a], delta_e = 10 }` or
   `{ material = true, delta_e = 10 }` (the material's own color, whatever it is); always written
-  (`unprinted = []` for none), none when absent, ΔE 0–100, at most 256, one material entry. The first version was generated by
-  `rekolor palettes generate` (predominant, mutually most different colors: see
-  `crates/cli/src/generate.rs`); since then the file is the source of truth and may be hand-edited.
+  (`unprinted = []` for none), none when absent, ΔE 0–100, at most 256, one material entry. The
+  first version was generated by `rekolor palettes generate` (predominant, mutually most different
+  colors: see `crates/cli/src/generate.rs`); since then the file is the source of truth and may be
+  hand-edited.
 - `<name>-out-{3,7,16}.png`: the reviewed outputs.
 
 The golden test only reads and compares decoded pixels exactly. On a mismatch it reports the number
 of differing pixels with the first coordinates, and writes a diff image (magenta on a faded copy of
 the expected output) to `$TMPDIR/rekolor-golden-diff/`.
 
-After an intentional change (a behavior decision, an edited config):
+After an intentional change (a behavior change, an edited config):
 
 ```sh
 target/release/rekolor golden update ../samples   # rewrite the outputs
@@ -186,7 +187,7 @@ git diff --stat ../samples                        # review the changed images, t
 
 `palettes generate` keeps existing configs; `--force` regenerates them and overwrites hand edits.
 
-## Baseline snapshot (R9, P1)
+## Baseline snapshot
 
 `testdata/baseline/` holds the **current approved behavior** of `core` on generated inputs. Tests only
 read it; after an intentional change, regenerate it and review the diff:
@@ -203,27 +204,14 @@ only when their decoded pixels differ.
 | Path | What |
 |---|---|
 | `testdata/generator.rs` | Deterministic inputs, plain Rust with no dependencies, included as a module wherever needed. Fixtures: `alpha_ramp` (every alpha 0–255 on 8 colors), `edges` (alpha- and color-anti-aliased edges on a transparent background), `picks` (exact pick colors and their ±1 neighbors), `gradient` (many unique colors), `noise` (random RGBA), `transparent` (fully transparent pixels with hidden RGB). Mapping sets: `none`, `one`, `calendar3`, `screenshot8`, `swapped4`. Suggestion colors: a 16-level grid plus 1,000 distinct off-grid colors (5,096 distinct). |
-| `testdata/baseline/recolor/<fixture>__<mapping set>.png` | `recolor` for every fixture × mapping set. Compared as **decoded pixels** (X2). |
+| `testdata/baseline/recolor/<fixture>__<mapping set>.png` | `recolor` for every fixture × mapping set. Compared as **decoded pixels**. |
 | `testdata/baseline/image-info.tsv` | `analyze` for every fixture. |
 | `testdata/baseline/pantone-suggestions.tsv` | `Palette::suggest` for the suggestion colors, with ΔE. Compared exactly. |
-| `testdata/baseline/delta-e-fingerprint.tsv` | ΔE fingerprint (R11): a hash over the `f32` bits of ΔE for 100,000 generated color pairs, plus exact values for a few pairs. Native and WASM tests must reproduce it bit for bit. |
+| `testdata/baseline/delta-e-fingerprint.tsv` | ΔE fingerprint: a hash over the `f32` bits of ΔE for 100,000 generated color pairs, plus exact values for a few pairs. Native and WASM tests must reproduce it bit for bit. |
 | `testdata/ciede2000-sharma.tsv` | CIEDE2000 reference data (not generated; see "Color math"). |
-| `testdata/decoders/` | Cross-decoder fixtures (M2): encoded images (opaque, EXIF PNG and JPEG, alpha ramp, ICC profile) and how `rekolor-io` decodes them (`<name>.rgba`, `references.tsv`). The web app's browser tests compare the browser's decoding with these. Regenerate with `cargo run --release -p rekolor-io --example update_decoder_fixtures`. |
+| `testdata/decoders/` | Cross-decoder fixtures: encoded images (opaque, EXIF PNG and JPEG, alpha ramp, ICC profile) and how `rekolor-io` decodes them (`<name>.rgba`, `references.tsv`). The web app's browser tests compare the browser's decoding with these. Regenerate with `cargo run --release -p rekolor-io --example update_decoder_fixtures`. |
 
-### History
-
-- The baseline was first recorded from the existing crate after the dependency upgrade (R12), at commit
-  `c0d094c` ("Record the baseline"), which contains the old sources and the recorder
-  (`rust/src/`, `rust/examples/record_baseline.rs`). `crates/core` reproduced those 30 recolor outputs
-  and the image info exactly, natively and in WASM.
-- Until behavior step 1, `pantone-suggestions.tsv` held the **2023 JavaScript** suggestions
-  (`typescript/src/palette.ts` with `color-diff`, recorded by `testdata/record_pantone_suggestions.cjs`,
-  since removed; both are in git history).
-  The Rust suggestions matched all 5,096 by name; ΔE differed by at most 0.005 (f32 vs f64). That
-  file is in git history; the snapshot now holds the Rust suggestions, for a new color set (the old one
-  repeated after 256 of its 1,000 pseudo-random colors).
-
-## Color math (R11)
+## Color math
 
 Lab conversion and CIEDE2000 come from the [`palette`](https://crates.io/crates/palette) crate
 (0.7.7), in `f32`. `core` exposes `Lab` (`palette::Lab<D65, f32>`), `lab(Rgb8)` (from encoded sRGB) and
@@ -241,11 +229,11 @@ re-exported.
   `palette/std` anywhere in the workspace:** Cargo
   features are additive, so one dependency doing it would bring the difference back. The fingerprint
   tests would catch it; the `cargo tree` checks above show the resolved features.
-- **Cost:** natively, `libm` is about 2.5× slower than `std` for ΔE (the golden test went from ~15 s to
-  ~40 s at the time). In WASM there's no extra cost: `std` already uses the musl port there.
-- **Speed and memory (no behavior change):** `recolor` remembers each composited color's answer in a
-  fixed 32 MiB table for images over 65,536 pixels, so repeated colors skip the CIEDE2000 work (golden
-  test ~40 s → ~5 s; identical output, checked by the goldens, the baseline and an equivalence test).
+- **Cost:** natively, `libm` is about 2.5× slower than `std` for ΔE. In WASM there's no extra cost:
+  `std` already uses the musl port there.
+- **Speed and memory:** `recolor` remembers each composited color's answer in a fixed 32 MiB table
+  for images over 65,536 pixels, so repeated colors skip the CIEDE2000 work (identical output, checked
+  by the goldens, the baseline and an equivalence test).
   `color_count` counts distinct colors with a fixed 2 MiB bit table; `analyze` also counts RGBA
   values, which needs memory per distinct value.
 - **Reference data:** `testdata/ciede2000-sharma.tsv` holds the 34 test pairs from G. Sharma, W. Wu and
@@ -253,68 +241,37 @@ re-exported.
   and mathematical observations", *Color Research & Application* 30(1), 2005. Retrieved 2026-10-07 from
   <https://hajim.rochester.edu/ece/sites/gsharma/ciede2000/dataNprograms/ciede2000testdata.txt>; the
   values are unchanged, tab-separated as published, with a `#` header line added (34 rows). Native and
-  WASM tests check every pair within `1e-4` (the reference has 4 decimals). The previous implementation
-  (`lab` + `deltae`) passed them too; its ΔE differed from `palette`'s by up to 0.001 because of the
-  sRGB→Lab conversion (up to ~0.005 per L/a/b channel).
+  WASM tests check every pair within `1e-4` (the reference has 4 decimals).
 
 ## Behavior
 
-The engine reproduces the existing recolor behavior (R9): nearest-ink matching, compositing over
-white, opaque output, earlier mapping wins ties. The behavior decisions (`.agents/behavior-issues/`,
-local) kept those; changes so far:
-
-- **Material color (`.agents/material-color/`):** compositing is over a chosen material color instead
-  of always white: per channel `(a·c + (255 − a)·m) / 255`, truncating, on the stored sRGB values.
-  Over white this is exactly the earlier formula, so no baseline, suggestion or golden output
-  changed. `pick`, `recolor`, `analyze`/`color_count`, config resolving and the generator take the
+- **Matching:** each pixel is composited over the material color (white by default) and takes the
+  ink nearest to it by CIEDE2000; a pixel whose composited color equals a mapping's source takes that
+  mapping's ink. The output is opaque, except for colors left unprinted.
+- **Material color:** per channel `(a·c + (255 − a)·m) / 255`, truncating, on the stored sRGB
+  values. `pick`, `recolor`, `analyze`/`color_count`, config resolving and the generator take the
   material.
-- **Colors left unprinted (material-color U1, U8):** `recolor_with_ranges` takes material ranges, each
-  a stored pixel and a ΔE. A pixel whose composited color is within a range's ΔE (CIEDE2000) of the
-  range's pixel composited over the material takes no ink and is **transparent** (`[0, 0, 0, 0]`) in
-  the output, so the material shows through; `RecolorStats::unprinted` counts them. Ranges are
-  checked before the mappings, so they win over an exact pick. With no ranges the output is exactly
-  `recolor`'s (fully opaque), so no baseline or golden output changed. Configs carry them as
-  `unprinted` (see "Golden set"); the CLI's `recolor` and `golden update` use them.
+- **Colors left unprinted:** `recolor_with_ranges` takes material ranges, each a stored pixel and a
+  ΔE. A pixel whose composited color is within a range's ΔE (CIEDE2000) of the range's pixel
+  composited over the material takes no ink and is **transparent** (`[0, 0, 0, 0]`) in the output, so
+  the material shows through; `RecolorStats::unprinted` counts them. Ranges are checked before the
+  mappings, so they win over an exact pick. With no ranges the output is exactly `recolor`'s.
+  Configs carry them as `unprinted` (see "Golden set"); the CLI's `recolor` and `golden update` use
+  them.
+- **Suggestions:** `Palette::suggest` is the plain nearest entry (CIEDE2000), real ink or not
+  ("Pure White/Black (non-palette)" included). The config generator skips any candidate whose ink is
+  already taken, so one changed suggestion can move later picks.
+- **Zero and one mapping:** with no mappings, `recolor` returns the composited copy (the image as it
+  looks on the material); with one mapping, every pixel takes that ink. Tested in `core`, WASM and
+  the TS contract.
+- **Color counts:** `analyze` reports `colors`, the number of distinct colors after compositing over
+  the material (what `recolor` matches), and `rgbaColors`, the distinct RGBA values as stored.
+- **Ties:** palette file order decides ties between entries with the same color (e.g. Pantone 303
+  before 547); `palettes/pantone.json` is a JSON object, and every reader keeps its key order
+  (`serde_json` with `preserve_order`, `Object.entries`). When a pixel is equally near to two
+  mappings (or matches two exactly), the earlier mapping wins.
+- **Native vs WASM:** ΔE is bit-identical in native and WASM builds, so ties and near-ties resolve
+  the same way in the browser as in the CLI and goldens (see "Color math").
 
-- **I5:** `Palette::suggest` is the plain nearest entry (CIEDE2000, ties to the earlier entry). The
-  2023 preference for real inks over "Pure White/Black (non-palette)" was dropped; on the snapshot's
-  5,096 colors this changed 6 suggestions, all near-black or near-white. The recolor algorithm didn't
-  change, so the 30 generated recolor baseline PNGs stayed the same. The owner then chose to
-  regenerate the golden configs, which changed two configs and four outputs:
-  - `02-scarlet-macaw`: the background pick `[244,239,235]` goes from Pantone 427 to Pure White at all
-    three sizes. At size 16 the freed Pantone 427 then goes to `[225,219,207]`, replacing the
-    `[171,59,47]` / Pantone 1805 pick.
-  - `06-neon-street` size 16: the `[255,255,239]` candidate now suggests Pure White, which is already
-    taken, so the generator skips it and `[76,41,48]` / Pantone 5185 takes the slot.
-
-  The generator skips any candidate whose ink is already taken, so one renamed suggestion can move
-  later picks.
-
-- **I8 (contract, no change):** with no mappings, `recolor` returns the composited copy (the image as
-  it looks on the material, white by default); with one mapping, every pixel takes that ink. Tested in `core`, WASM and the TS
-  contract.
-
-- **I4:** `analyze` reports `colors`, the number of distinct colors after compositing over the
-  material (what `recolor` matches), instead of the old RGB count that ignored alpha; `rgbaColors` stays. In the
-  snapshot this changed the 4 fixtures with transparency (e.g. `transparent`: 256 → 1).
-
-- **I7 (documented, no change):** palette file order decides ties between entries with the same color
-  (e.g. Pantone 303 before 547). `palettes/pantone.json` stays a JSON object; every reader keeps its
-  key order (`serde_json` with `preserve_order`, `Object.entries`).
-- **I9 (documented, no change):** when a pixel is equally near to two mappings (or matches two exactly),
-  the earlier mapping wins.
-
-- **R11 (`palette` crate, see "Color math"):** no suggestion name changed; ΔE values in the snapshot
-  moved by at most 0.001. 5 pixels changed in 3 recolor baseline PNGs. With the configs unchanged, 25 of
-  57 golden outputs changed, 1,244 pixels in total, at near-ties (largest: `icon-calendar-out-3` 0.13 %,
-  `05-mae-jemison-out-3` 0.08 %). The owner then chose to regenerate the configs (D7 b): only
-  `07-alpha-hue` changed, because its farthest-point picks had a near-tie. At size 3 the third pick is now
-  `[0,224,255,116]` / Pantone 3105 instead of `[255,0,2,116]` / Pantone 177, which changes 31.5 % of
-  `07-alpha-hue-out-3`. Sizes 7 and 16 only reordered their picks: size 7's output is unchanged, and size
-  16's 26 changed pixels come from the ΔE switch (counted in the 1,244), not from the reordering.
-
-**Native vs WASM:** since R11, ΔE is bit-identical in native and WASM builds, so ties and near-ties
-resolve the same way in the browser as in the CLI and goldens (see "Color math" above).
-
-Each change updates the baseline snapshot (and, if pixels move, the goldens) in the same commit, so its
-effect is a reviewed diff.
+Each behavior change updates the baseline snapshot (and, if pixels move, the goldens) in the same
+commit, so its effect is a reviewed diff.

@@ -50,7 +50,7 @@ describe('Serial', () => {
     expect(log).toEqual(['first', 'material C']);
   });
 
-  test('coalescing: a push never moves ahead of a task queued before it (GPT review 1)', async () => {
+  test('coalescing: a push never moves ahead of a task queued before it', async () => {
     const { serial, log, push, drain } = await busy();
     push('A');
     void serial.run(() => log.push('import'));

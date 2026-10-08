@@ -1,14 +1,14 @@
 use crate::color::{Lab, delta_e_2000_lab, lab};
 use crate::{Error, ImageRef, Rgb8, Rgba8, composite};
 
-/// One picked color and the ink that replaces it (`from` → `to` in the 2023 UI).
+/// One picked color and the ink that replaces it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Mapping {
     pub source: Rgb8,
     pub ink: Rgb8,
 }
 
-/// A color left unprinted (material-color U1): pixels whose composited color is within `delta_e`
+/// A color left unprinted: pixels whose composited color is within `delta_e`
 /// (CIEDE2000) of `pixel` composited over the material take no ink, so the material shows there.
 /// Saves ink where the material already has the color.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -31,8 +31,7 @@ pub struct RecolorStats {
 
 /// Recolors `image` into `out`, which must have the same length as the source buffer.
 ///
-/// Contract (behavior decisions I1, I2, I8, I9: all kept from the existing implementation, with
-/// the material color in place of white; [`Rgb8::WHITE`] reproduces the behavior from before it):
+/// Contract ([`Rgb8::WHITE`] as the material composites over white):
 /// 1. each pixel is composited over `material` ([`composite`]); the output is opaque;
 /// 2. if the result equals a mapping's `source`, it takes that mapping's ink (first match wins);
 /// 3. otherwise it takes the **ink** nearest to it by CIEDE2000 (on a tie, the earlier mapping);
@@ -50,9 +49,9 @@ pub fn recolor(
     recolor_with_ranges(image, mappings, material, &[], out)
 }
 
-/// [`recolor`], plus colors left unprinted (material-color U1, U8): a pixel within a range's ΔE
+/// [`recolor`], plus colors left unprinted: a pixel within a range's ΔE
 /// takes no ink and is **transparent** in the output (`[0, 0, 0, 0]`), so the material shows
-/// through. Ranges are checked first, so they win over an exact pick (K1). With no ranges this is
+/// through. Ranges are checked first, so they win over an exact pick. With no ranges this is
 /// [`recolor`] exactly.
 pub fn recolor_with_ranges(
     image: ImageRef<'_>,
@@ -285,7 +284,7 @@ mod tests {
 
     #[test]
     fn nearest_ink_ties_go_to_the_earlier_mapping() {
-        // Two different inks at exactly the same CIEDE2000 distance from gray, 39.605984 (R11: the
+        // Two different inks at exactly the same CIEDE2000 distance from gray, 39.605984 (the
         // first exact tie in a search over all sRGB colors in r, g, b order). The same pair is in
         // the ΔE fingerprint, the WASM suite and the TS contract. If the ΔE math ever changes, the
         // precondition fails instead of testing a non-tie.
@@ -461,7 +460,7 @@ mod tests {
         assert_eq!(out, [255, 255, 255, 255, 10, 20, 30, 255]);
         assert_eq!((stats.exact, stats.nearest), (0, 2));
 
-        // On a material: transparent → the material, translucent → mixed toward it (I8 c).
+        // On a material: transparent → the material, translucent → mixed toward it.
         let rgba = [10, 20, 30, 0, 10, 20, 30, 255, 203, 0, 0, 100];
         let (out, _) = run_on(&rgba, &[], BLACK);
         assert_eq!(out, [0, 0, 0, 255, 10, 20, 30, 255, 79, 0, 0, 255]);

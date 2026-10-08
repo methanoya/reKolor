@@ -1,4 +1,4 @@
-// Browser-side image codec (R5: the browser decodes for the app). Works in a worker or on the main
+// Browser-side image codec (the browser decodes for the app). Works in a worker or on the main
 // thread: `createImageBitmap` + `OffscreenCanvas`. Tested in real browsers (tests/browser).
 
 import { fileLimitError, imageLimitError } from './limits';
@@ -15,11 +15,11 @@ export interface Decoded {
 
 /**
  * Decodes an image file: EXIF orientation applied, the embedded color profile converted to sRGB,
- * straight (not premultiplied) alpha in the result. The size limits (WA1) are checked before any
+ * straight (not premultiplied) alpha in the result. The size limits are checked before any
  * pixel buffer is made.
  *
  * Canvases store premultiplied alpha internally, so semi-transparent colors can come back slightly
- * changed; the cross-decoder test (M2) measures this.
+ * changed; the cross-decoder test measures this.
  */
 export async function decodeImage(file: Blob): Promise<AppOutcome<Decoded>> {
   const fileTooLarge = fileLimitError(file.size);
@@ -29,7 +29,7 @@ export async function decodeImage(file: Blob): Promise<AppOutcome<Decoded>> {
   try {
     // `premultiplyAlpha` stays at its default on purpose: the canvas stores premultiplied alpha
     // anyway, and WebKit mishandles a `'none'` bitmap drawn onto a canvas (it un-premultiplies
-    // twice: alpha 117, red 117 came back as red 255). Found by the cross-decoder test (M2).
+    // twice: alpha 117, red 117 came back as red 255). Found by the cross-decoder test.
     bitmap = await createImageBitmap(file, {
       imageOrientation: 'from-image',
       colorSpaceConversion: 'default',

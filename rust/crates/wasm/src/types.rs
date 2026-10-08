@@ -1,4 +1,4 @@
-//! TypeScript-facing data types (T2, T6) and their conversions to and from core types.
+//! TypeScript-facing data types and their conversions to and from core types.
 
 use rekolor_core as core;
 use serde::{Deserialize, Serialize};
@@ -114,7 +114,7 @@ pub struct ColorMismatch {
     pub max_channel_difference: u8,
 }
 
-/// The result of picking a pixel (R10).
+/// The result of picking a pixel.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Tsify)]
 pub struct Pick {
     /// The stored pixel.

@@ -1,4 +1,4 @@
-// The real worker through Comlink (T7, W6 b): decoding in the worker, generations, transfers,
+// The real worker through Comlink: decoding in the worker, generations, transfers,
 // typed errors, and the PNG of exactly the current revision.
 
 import { afterAll, describe, expect, test } from 'vitest';
@@ -47,7 +47,7 @@ describe('the engine worker', () => {
 
     const png = value(await client.call((api) => api.encodePng(1, 1)));
     expect(png.type).toBe('image/png');
-    // One mapping: every pixel takes that ink (I8), so the PNG decodes to a single color.
+    // One mapping: every pixel takes that ink, so the PNG decodes to a single color.
     const bitmap = await createImageBitmap(png);
     const ctx = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d')!;
     ctx.drawImage(bitmap, 0, 0);

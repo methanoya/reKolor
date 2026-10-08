@@ -1,4 +1,4 @@
-// Resource limits (owner decision WA1 a): checked before any pixel buffer is allocated.
+// Resource limits: checked before any pixel buffer is allocated.
 
 export const LIMITS = {
   /** Encoded image file size. */
@@ -7,7 +7,7 @@ export const LIMITS = {
   side: 16_384,
   /** Width × height: 24 megapixels, i.e. 96 MiB per RGBA buffer. */
   pixels: 24_000_000,
-  /** Palette config import (W10 v). */
+  /** Palette config import. */
   configBytes: 256 * 1024,
   /** Picks (= recolor mappings), the same limit as a config section and WASM `recolor`. */
   picks: 256,

@@ -22,7 +22,7 @@ export default defineConfig((env) =>
               headless: true,
               provider: playwright(),
               commands: mouseCommands,
-              // WA3 a: all three Playwright engines (WebKit is not branded Safari).
+              // All three Playwright engines (WebKit is not branded Safari).
               instances: [{ browser: 'chromium' }, { browser: 'firefox' }, { browser: 'webkit' }],
             },
           },

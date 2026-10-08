@@ -1,4 +1,4 @@
-//! The reKolor command-line tool (R1, R6).
+//! The reKolor command-line tool.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -12,7 +12,7 @@ use rekolor_cli::{discover, generate, palette_file};
 use rekolor_core::{Mapping, MaterialRange, Palette, Rgb8, analyze, recolor_with_ranges};
 use rekolor_io::DecodedImage;
 
-/// Palette sizes of the golden set (X1).
+/// Palette sizes of the golden set.
 const GOLDEN_SIZES: [u32; 3] = [3, 7, 16];
 
 #[derive(Parser)]
@@ -129,7 +129,7 @@ fn run(cli: Cli) -> Result<()> {
             let (mappings, material, ranges) = match (&args.config, args.size) {
                 (Some(path), Some(size)) => {
                     let config = config::load(path)?;
-                    // An explicit --material overrides the config's (C3 b); the config's unprinted
+                    // An explicit --material overrides the config's; the config's unprinted
                     // colors are used, the material's own one on the material in use.
                     let material = args.material.unwrap_or(config.material.into());
                     let mappings = config
@@ -173,7 +173,7 @@ fn run(cli: Cli) -> Result<()> {
             force,
             material,
         }) => {
-            // A chosen material leaves its own color unprinted, as in the app (U7).
+            // A chosen material leaves its own color unprinted, as in the app.
             let unprinted = material
                 .map(|_| Unprinted::Material {
                     delta_e: DEFAULT_UNPRINTED_DELTA_E,
@@ -303,7 +303,7 @@ struct GoldenJob {
     sizes: Vec<(u32, Vec<Mapping>)>,
 }
 
-/// Decodes an image and prints its decoder warnings (M1) to stderr.
+/// Decodes an image and prints its decoder warnings to stderr.
 fn decode(path: &Path) -> Result<DecodedImage> {
     let image = rekolor_io::decode_file(path)?;
     for warning in image.warnings() {

@@ -1,5 +1,5 @@
 //! Rewrites the baseline snapshot in `rust/testdata/baseline/` from the current `rekolor-core`
-//! (P1: the baseline is "current approved behavior"; review the diff, then commit).
+//! (the baseline is "current approved behavior"; review the diff, then commit).
 //!
 //!     cargo run --release -p rekolor-core --example update_baseline [-- --colors-from-current]
 //!
@@ -9,10 +9,10 @@
 //! - `pantone-suggestions.tsv`: `Palette::suggest` for `generator::suggestion_colors()`, or with
 //!   `--colors-from-current` for the colors already in the file (e.g. to compare two ΔE
 //!   implementations on the same colors).
-//! - `delta-e-fingerprint.tsv`: `generator::delta_e_fingerprint` with `delta_e_2000` (R11); the
+//! - `delta-e-fingerprint.tsv`: `generator::delta_e_fingerprint` with `delta_e_2000`; the
 //!   native and WASM tests must reproduce it bit for bit.
 //!
-//! Tests only read these files. The 2023 JavaScript suggestions are in git history (`c0d094c`).
+//! Tests only read these files.
 
 #[path = "../../../testdata/generator.rs"]
 mod generator;
@@ -101,7 +101,7 @@ fn main() {
     }
     write_if_changed(&suggestions_path, &tsv, &rust_dir, &mut changed);
 
-    // ΔE fingerprint (R11): proves native and WASM compute bit-identical ΔE.
+    // ΔE fingerprint: proves native and WASM compute bit-identical ΔE.
     write_if_changed(
         &baseline.join("delta-e-fingerprint.tsv"),
         &generator::delta_e_fingerprint(|x, y| delta_e_2000(x.into(), y.into())),

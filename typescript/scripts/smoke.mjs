@@ -1,6 +1,5 @@
-// Production smoke test under the GitHub Pages base path (plan step 1; W14 c keeps deployment for
-// later, but the paths must already work): builds with `--mode pages`, serves `dist/` at
-// `/reKolor/`, and drives the app in Chromium. Exits non-zero on any failure, console error or
+// Production smoke test under the GitHub Pages base path: builds with `--mode pages`, serves
+// `dist/` at `/reKolor/`, and drives the app in Chromium. Exits non-zero on any failure, console error or
 // failed request.
 //
 //   npm run smoke

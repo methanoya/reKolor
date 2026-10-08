@@ -53,7 +53,7 @@ export interface Rematched {
   matching: Rgb;
   /**
    * Only when `matching` changed: the nearest inks, nearest first (the first is the suggestion, as
-   * for a click). Absent: the pick keeps its ink and alternatives (M3 a).
+   * for a click). Absent: the pick keeps its ink and alternatives.
    */
   alternatives?: PaletteMatch[];
 }
@@ -105,7 +105,7 @@ export class Session {
   }
 
   /**
-   * Re-matches picks on a new material (M3 a), in order: each pick's pixel composited over it and,
+   * Re-matches picks on a new material, in order: each pick's pixel composited over it and,
    * where that color differs from the pick's current `matching`, the nearest inks.
    */
   rematch(picks: { pixel: Rgba; matching: Rgb }[], material: Rgb): AppOutcome<Rematched[]> {
@@ -152,7 +152,7 @@ export class Session {
       return superseded();
     }
     const png = await this.#codec.encodePng(output.rgba, size.width, size.height);
-    // Encoding is async: a newer image or recolor may have arrived meanwhile (review fix).
+    // Encoding is async: a newer image or recolor may have arrived meanwhile.
     return this.#output === output && this.#current === generation ? ok(png) : superseded();
   }
 

@@ -65,7 +65,7 @@ pub fn composite(Rgba8 { r, g, b, a }: Rgba8, material: Rgb8) -> Rgb8 {
     )
 }
 
-/// CIE L\*a\*b\* with the D65 white point, in `f32` (the `palette` crate's type; R11, D6.1).
+/// CIE L\*a\*b\* with the D65 white point, in `f32` (the `palette` crate's type).
 pub type Lab = palette::Lab<D65, f32>;
 
 /// Converts an (encoded, not linear) sRGB color to Lab.
@@ -108,7 +108,7 @@ mod tests {
 
     #[test]
     fn composite_truncates() {
-        // (255 - 100) + 100 * 203 / 255 = 155 + 79.6… → 234 (the 2023 TypeScript rounded to 235)
+        // (255 - 100) + 100 * 203 / 255 = 155 + 79.6… → 234 (not rounded to 235)
         assert_eq!(composite(Rgba8::new(203, 0, 0, 100), Rgb8::WHITE).r, 234);
         // (255 - 200) + 200 * 10 / 255 = 55 + 7.8… → 62
         assert_eq!(composite(Rgba8::new(10, 0, 0, 200), Rgb8::WHITE).r, 62);
@@ -116,7 +116,7 @@ mod tests {
 
     #[test]
     fn composite_mixes_toward_the_material() {
-        // The example in `.agents/material-color/decisions.md`: (100·203 + 155·m) / 255 for red,
+        // (100·203 + 155·m) / 255 for red,
         // 155·m / 255 for green and blue.
         let pixel = Rgba8::new(203, 0, 0, 100);
         assert_eq!(composite(pixel, Rgb8::WHITE), Rgb8::new(234, 155, 155));

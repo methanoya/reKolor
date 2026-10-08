@@ -14,7 +14,7 @@ extern "C" {
     pub type PaletteOutcome;
 }
 
-/// A palette kept on the WASM side, with Lab values computed once (T1).
+/// A palette kept on the WASM side, with Lab values computed once.
 #[wasm_bindgen]
 #[derive(Debug)]
 pub struct Palette {

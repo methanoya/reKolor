@@ -1,4 +1,4 @@
-// Zoom and pan (W10 iv a): one view shared by the original and the result. Pure math, unit-tested.
+// Zoom and pan: one view shared by the original and the result. Pure math, unit-tested.
 //
 // A view maps image coordinates to the viewport's CSS pixels:
 //   css = (image − origin) × scale,   image = origin + css ÷ scale

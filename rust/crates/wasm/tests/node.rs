@@ -1,8 +1,8 @@
-//! Runs inside WASM: `wasm-pack test --node crates/wasm` (X3 b).
+//! Runs inside WASM: `wasm-pack test --node crates/wasm`.
 //!
-//! Proves the interface on the WASM target: the baseline (R9) reproduced inside WASM (native
+//! Proves the interface on the WASM target: the baseline reproduced inside WASM (native
 //! and WASM float math agree), malformed input coming back as error values while the module keeps
-//! working, and buffer-length checks. R11: the ΔE fingerprint, the Sharma reference data and the
+//! working, and buffer-length checks. Also the ΔE fingerprint, the Sharma reference data and the
 //! Pantone suggestion snapshot, all checked against the same files as the native tests.
 
 #![cfg(target_arch = "wasm32")]
@@ -346,7 +346,7 @@ fn palette_suggest_and_nearest() {
 
 #[wasm_bindgen_test]
 fn numbers_must_be_whole_finite_and_in_u32_range() {
-    // Review fix F1: these would otherwise be truncated or wrapped into valid-looking values.
+    // These would otherwise be truncated or wrapped into valid-looking values.
     let one = || vec![5, 6, 7, 255];
     for (w, h) in [
         (1.5, 1.0),
@@ -408,7 +408,7 @@ fn numbers_must_be_whole_finite_and_in_u32_range() {
 
 #[wasm_bindgen_test]
 fn zero_and_one_mapping_follow_the_contract() {
-    // I8: no mappings → the composited copy; one mapping → every pixel takes that ink.
+    // No mappings → the composited copy; one mapping → every pixel takes that ink.
     let image = SourceImage::from_rgba(vec![230, 76, 60, 255, 9, 9, 9, 0], 2, 1).unwrap();
     let mut out = [0u8; 8];
 
@@ -438,7 +438,7 @@ fn zero_and_one_mapping_follow_the_contract() {
 
 #[wasm_bindgen_test]
 fn delta_e_matches_the_native_fingerprint() {
-    // R11: bit-identical ΔE on native and WASM. The file was recorded natively.
+    // Bit-identical ΔE on native and WASM. The file was recorded natively.
     let recorded = include_str!("../../../testdata/baseline/delta-e-fingerprint.tsv");
     let now = generator::delta_e_fingerprint(|x, y| rekolor_core::delta_e_2000(x.into(), y.into()));
     assert_eq!(now, recorded, "WASM ΔE differs from the native fingerprint");
@@ -494,7 +494,7 @@ fn suggestions_match_the_snapshot() {
 
 #[wasm_bindgen_test]
 fn nearest_ink_ties_go_to_the_earlier_mapping() {
-    // I9 in WASM: the exact tie from the core test (same bits on both targets since R11).
+    // Ties in WASM: the exact tie from the core test (same bits on both targets).
     let gray = SourceImage::from_rgba(vec![128, 128, 128, 255], 1, 1).unwrap();
     let (a, b) = (rgb([0, 2, 227]), rgb([0, 4, 0]));
     assert_eq!(
@@ -556,7 +556,7 @@ const SAMPLE_CONFIGS: &[&str] = &[
 
 #[wasm_bindgen_test]
 fn sample_configs_parse_resolve_and_round_trip() {
-    // W10 v: the app reads the golden-set configs exactly like the CLI.
+    // The app reads the golden-set configs exactly like the CLI.
     let palette = pantone_palette();
     for text in SAMPLE_CONFIGS {
         let parsed: ParsedConfig = ok(read(parse_config(text)));
@@ -722,7 +722,7 @@ fn every_call_composites_over_the_given_material() {
     let p: Pick = ok(read(image.pick(2.0, 0.0, None, material(black), &palette)));
     assert_eq!(p.matching, rgb([79, 0, 0]));
 
-    // No mappings: the copy composited over the material (I8 c).
+    // No mappings: the copy composited over the material.
     let mut out = [0u8; 12];
     let none = Ts::from_rust(&RecolorRequest {
         material_ranges: vec![],
@@ -769,7 +769,7 @@ fn every_call_composites_over_the_given_material() {
 #[wasm_bindgen_test]
 fn configs_carry_the_material() {
     let palette = pantone_palette();
-    // Absent: white (M4.1 a).
+    // Absent: white.
     let parsed: ParsedConfig = ok(read(parse_config("[[palette]]\nsize = 1\npicks = []\n")));
     assert_eq!(parsed.material, WHITE);
 
@@ -784,7 +784,7 @@ fn configs_carry_the_material() {
     assert_eq!(resolved.picks[0].matching, rgb([0, 0, 0]));
     assert_eq!(resolved.picks[0].ink.delta_e, 0.0);
 
-    // Always written (M4 b), white too.
+    // Always written, white too.
     for c in [rgb([0, 0, 0]), WHITE] {
         let export = ConfigExport {
             unprinted: vec![],

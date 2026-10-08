@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use tsify::{Ts, Tsify};
 use wasm_bindgen::prelude::*;
 
-/// The result of every call that can fail on input (T5):
+/// The result of every call that can fail on input:
 /// `{ status: "ok", value }` or `{ status: "error", error }`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Tsify)]
 #[serde(tag = "status", rename_all = "camelCase")]
@@ -104,7 +104,7 @@ pub(crate) fn outcome_js<T: Tsify + Serialize, O: JsCast>(outcome: Outcome<T>) -
 
 /// Converts a JS number to `u32`, rejecting anything that isn't a whole, finite number from 0 to
 /// `u32::MAX`. wasm-bindgen's own `u32` parameters would silently truncate fractions, wrap large
-/// values and turn NaN/Infinity into 0 (review fix F1).
+/// values and turn NaN/Infinity into 0.
 pub(crate) fn whole_u32(name: &str, value: f64) -> Result<u32, ErrorInfo> {
     if value.is_finite() && value.fract() == 0.0 && (0.0..=f64::from(u32::MAX)).contains(&value) {
         Ok(value as u32)

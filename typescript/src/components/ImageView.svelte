@@ -22,7 +22,7 @@
     view: View;
     /** Source pixels to mark (picks made by clicking), by pick id. */
     markers?: { id: number; x: number; y: number }[];
-    /** Source pixels to mark with a square (colors left unprinted, U3); not movable. */
+    /** Source pixels to mark with a square (colors left unprinted); not movable. */
     squares?: { x: number; y: number }[];
     placeholder: string;
     onview: (view: View) => void;
@@ -32,8 +32,8 @@
     /** Escape, or the pointer was taken away (`pointercancel`), during a pick move. */
     onmovecancel?: (drag: number) => void;
     /**
-     * A CSS color behind the image instead of the checkerboard (the material, M5 a). Drawn as the
-     * frame's background, never into the image canvas, which must hold image pixels only (C5 a).
+     * A CSS color behind the image instead of the checkerboard (the material). Drawn as the
+     * frame's background, never into the image canvas, which must hold image pixels only.
      */
     backdrop?: string | undefined;
   }
@@ -173,7 +173,7 @@
   }
 
   function onpointerdown(e: PointerEvent) {
-    // One gesture at a time: a second pointer can't replace or join the one in progress (review fix).
+    // One gesture at a time: a second pointer can't replace or join the one in progress.
     if (moving || drag || !bitmap || e.button !== 0) return;
     canvas.setPointerCapture(e.pointerId);
     const { px, py } = position(e);
@@ -193,7 +193,7 @@
   }
 
   function onpointermove(e: PointerEvent) {
-    // A move belongs to the pointer that started it; other pointers can't drive it (review fix).
+    // A move belongs to the pointer that started it; other pointers can't drive it.
     if (moving && e.pointerId !== moving.pointerId) return;
     pointer = position(e);
     shift = e.shiftKey;
@@ -222,7 +222,7 @@
     if (moved) onmove?.({ drag: d, id, x, y, seen: seenColor(x, y), done: true });
   }
 
-  /** Cancels a pick move (F1 a): the app puts the pick back as it was. */
+  /** Cancels a pick move: the app puts the pick back as it was. */
   function cancelMove() {
     if (!moving) return;
     const { drag: d, pointerId } = moving;
@@ -233,7 +233,7 @@
 
   /**
    * The browser took the pointer away (`pointercancel`), or its capture was lost without a release:
-   * a move is cancelled (F1 a), a pan is dropped. After a release or a cancel nothing is active, so
+   * a move is cancelled, a pan is dropped. After a release or a cancel nothing is active, so
    * the `lostpointercapture` that follows them does nothing.
    */
   function endGesture(e: PointerEvent) {
@@ -256,7 +256,7 @@
   }
 
   /**
-   * The color shown at a source pixel, for Rust's mismatch warning (R10). Only at 100 % and above,
+   * The color shown at a source pixel, for Rust's mismatch warning. Only at 100 % and above,
    * where pixels are drawn unsmoothed; reduced views blend neighbors, so nothing is sent then.
    */
   function seenColor(x: number, y: number): Rgba | undefined {

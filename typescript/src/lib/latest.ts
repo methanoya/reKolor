@@ -1,4 +1,4 @@
-// "Latest only" scheduling for live recolor (W10 vi a): at most one run in flight and one pending.
+// "Latest only" scheduling for live recolor: at most one run in flight and one pending.
 // A new request while a run is in flight replaces the pending one, so rapid pick changes cost at
 // most one extra run, not one per change. Runs can't be interrupted (Rust recolor is synchronous).
 

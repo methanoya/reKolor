@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { LIMITS, fileLimitError, imageLimitError } from './limits';
 
-describe('limits (WA1)', () => {
+describe('limits', () => {
   test('images within the limits pass', () => {
     expect(imageLimitError(1, 1)).toBeUndefined();
     expect(imageLimitError(16_384, 1_464)).toBeUndefined(); // 23.99 MP

@@ -62,7 +62,7 @@ fn generate_configs_then_update_goldens() {
 
     for image in ["samples/edges.png", "samples/sub/gradient.png"] {
         let config_path = root.join(image.replace(".png", ".palettes.toml"));
-        // The material is always written, white by default (M4 b).
+        // The material is always written, white by default.
         let text = std::fs::read_to_string(&config_path).unwrap();
         assert!(text.contains("\nmaterial = [255, 255, 255]\n"), "{text}");
         // No --material: nothing is left unprinted (written anyway).
@@ -215,7 +215,7 @@ fn decoder_warnings_go_to_stderr() {
 
 #[test]
 fn oversized_configs_are_rejected_before_writing() {
-    // Review fix F4: a hand-edited size-3 palette with 4 distinct inks.
+    // A hand-edited size-3 palette with 4 distinct inks.
     let tree = samples_tree();
     let root = tree.path();
     let palette = repo_palette();
@@ -253,7 +253,7 @@ fn oversized_configs_are_rejected_before_writing() {
 
 #[test]
 fn zero_sized_images_fail_cleanly() {
-    // Review fix F2: no panic (exit code 101), an ordinary error instead.
+    // No panic (exit code 101), an ordinary error instead.
     let dir = tempfile::tempdir().unwrap();
     let mut bytes = b"farbfeld".to_vec();
     bytes.extend_from_slice(&0u32.to_be_bytes());
@@ -270,7 +270,7 @@ fn zero_sized_images_fail_cleanly() {
 
 #[test]
 fn tga_inputs_work_end_to_end() {
-    // Review fix F3: TGA is found by discovery and decoded by extension.
+    // TGA is found by discovery and decoded by extension.
     let tree = samples_tree();
     let root = tree.path();
     let red_tga: &[u8] = &[
@@ -297,7 +297,7 @@ fn tga_inputs_work_end_to_end() {
 
 #[test]
 fn golden_update_writes_nothing_if_any_config_is_invalid() {
-    // Follow-up to review fix F4: the bad config belongs to the image that sorts LAST, so a
+    // The bad config belongs to the image that sorts LAST, so a
     // validate-as-you-go update would already have rewritten the first image's outputs.
     let tree = samples_tree();
     let root = tree.path();
@@ -429,7 +429,7 @@ fn a_config_material_is_used_and_material_overrides_it() {
     assert!(stdout.contains("on (0, 0, 0)"), "{stdout}");
     assert_eq!(pixel_at(&root.join("config.png"), 0, 0), [0, 0, 0, 255]);
 
-    // --material overrides it (C3 b): the same output as the config with its line edited.
+    // --material overrides it: the same output as the config with its line edited.
     let stdout = recolor("black.toml", "override.png", Some("255,255,255"));
     assert!(stdout.contains("on white"), "{stdout}");
     recolor("white.toml", "edited.png", None);
@@ -474,7 +474,7 @@ fn generate_on_a_material_writes_it_and_golden_update_uses_it() {
     assert_eq!(first.rgba[3], 0);
     assert_eq!(first.ink, "Pure Black (non-palette)");
 
-    // A chosen material leaves its own color unprinted, as in the app (U7).
+    // A chosen material leaves its own color unprinted, as in the app.
     assert!(
         text.contains("\nunprinted = [\n  { material = true, delta_e = 10 },\n]\n"),
         "{text}"
@@ -484,7 +484,7 @@ fn generate_on_a_material_writes_it_and_golden_update_uses_it() {
         &["golden", "update", "samples", "--palette", palette],
         root,
     ));
-    // The transparent background is the material: unprinted, so transparent in the output (U8).
+    // The transparent background is the material: unprinted, so transparent in the output.
     assert_eq!(
         pixel_at(&root.join("samples/edges-out-3.png"), 0, 0),
         [0, 0, 0, 0]

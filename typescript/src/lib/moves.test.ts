@@ -1,5 +1,5 @@
-// The pick-move rules (`.agents/repositioning`) with controlled promises: coalescing, the final
-// update, a second drag before the first settles, a reset, and cancel (F1 a).
+// The pick-move rules with controlled promises: coalescing, the final
+// update, a second drag before the first settles, a reset, and cancel.
 
 import { describe, expect, test } from 'vitest';
 import { Mover, type Marker } from './moves';
@@ -162,7 +162,7 @@ describe('Mover', () => {
     expect(restored).toEqual([{ id: 1, x: 10 }]); // where drag 1 left it, not the original 0
   });
 
-  test('a cancel while the release is being applied still restores (review fix)', async () => {
+  test('a cancel while the release is being applied still restores', async () => {
     const { mover, pick, applied, restored, hold, marker } = setup();
     mover.update(move(1, 10));
     await settle();

@@ -132,7 +132,7 @@ describe('Session (the worker rules)', () => {
   });
 });
 
-describe('Session.rematch (material changes, M3 a)', () => {
+describe('Session.rematch (material changes)', () => {
   test('re-matches each pick in Rust; only changed colors get new inks', () => {
     const { session } = setup();
     const opaque = { pixel: { r: 230, g: 76, b: 60, a: 255 }, matching: { r: 230, g: 76, b: 60 } };

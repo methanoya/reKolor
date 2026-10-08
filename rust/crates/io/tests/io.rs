@@ -1,4 +1,4 @@
-//! `rekolor-io`: decoding, encoding and the M1 warnings.
+//! `rekolor-io`: decoding, encoding and the decoder warnings.
 
 #[path = "../../../testdata/generator.rs"]
 mod generator;
@@ -198,7 +198,7 @@ const RED_TGA: &[u8] = &[
 
 #[test]
 fn zero_dimensions_are_a_typed_error_not_a_panic() {
-    // The Farbfeld decoder accepts 0×N images; `decode` must reject them (review fix F2).
+    // The Farbfeld decoder accepts 0×N images; `decode` must reject them.
     for (width, height) in [(0, 1), (1, 0), (0, 0)] {
         match decode(&empty_farbfeld(width, height)) {
             Err(Error::InvalidImage(rekolor_core::Error::EmptyImage { .. })) => {}
@@ -209,7 +209,7 @@ fn zero_dimensions_are_a_typed_error_not_a_panic() {
 
 #[test]
 fn tga_files_are_recognized_by_extension() {
-    // TGA has no magic bytes, so content detection can't find it (review fix F3).
+    // TGA has no magic bytes, so content detection can't find it.
     assert!(matches!(decode(RED_TGA), Err(Error::UnknownFormat)));
 
     let dir = tempfile::tempdir().unwrap();

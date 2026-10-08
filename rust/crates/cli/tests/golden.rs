@@ -1,4 +1,4 @@
-//! Golden set (X1, X2): every image in `samples/**` recolored from its `<name>.palettes.toml`
+//! Golden set: every image in `samples/**` recolored from its `<name>.palettes.toml`
 //! must match its reviewed `<name>-out-<size>.png` pixel for pixel.
 //!
 //! Opt-in (slow in debug builds): `cargo test --release -p rekolor-cli --test golden -- --ignored`

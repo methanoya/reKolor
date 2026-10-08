@@ -4,11 +4,11 @@ use crate::{Error, ImageRef, Palette, PaletteMatch, Rgb8, Rgba8, composite};
 /// still counts as a match. Above it, [`pick`] returns a [`ColorMismatch`] warning.
 ///
 /// The caller usually reads its color from a scaled, smoothed display canvas, so small
-/// differences are expected; large ones point to a coordinate-mapping bug (like the 2023
-/// HiDPI picking bug).
+/// differences are expected; large ones point to a coordinate-mapping bug (e.g. on a HiDPI
+/// display).
 pub const PICK_MISMATCH_TOLERANCE: u8 = 8;
 
-/// The result of picking the pixel at an image coordinate (R10).
+/// The result of picking the pixel at an image coordinate.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Pick<'a> {
     /// The stored pixel.

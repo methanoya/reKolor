@@ -1,4 +1,4 @@
-//! Deterministic test inputs for the baseline (R9) and the generated-buffer tests (X1).
+//! Deterministic test inputs for the baseline and the generated-buffer tests.
 //!
 //! Plain Rust with no dependencies and no crate-level attributes, so it can be included as a
 //! module from anywhere (`#[path = ".../testdata/generator.rs"] mod generator;`): the baseline
@@ -18,7 +18,7 @@ pub struct Fixture {
     pub rgba: Vec<u8>,
 }
 
-/// Picked colors and their inks, as the 2023 UI sent them (`from` → `to`).
+/// Picked colors and their inks (`from` → `to`).
 #[derive(Debug, Clone, Copy)]
 pub struct MappingSet {
     pub name: &'static str,
@@ -36,7 +36,7 @@ pub const MAPPING_SETS: &[MappingSet] = &[
         name: "one",
         pairs: &[([255, 184, 0], [252, 181, 20])], // Pantone 1235
     },
-    // The three pairs from the 2023 `main.rs` harness.
+    // Three picks: red, a pale gray and white.
     MappingSet {
         name: "calendar3",
         pairs: &[
@@ -45,8 +45,7 @@ pub const MAPPING_SETS: &[MappingSet] = &[
             ([255, 255, 255], [255, 255, 255]), // Pure White (non-palette)
         ],
     },
-    // Colors from the README screenshot plus white and black, each with the ink the 2023 JS
-    // suggested for it.
+    // Colors from the README screenshot plus white and black, each with a nearby Pantone ink.
     MappingSet {
         name: "screenshot8",
         pairs: &[
@@ -230,7 +229,7 @@ fn noise() -> Fixture {
 
 /// Colors for the Pantone suggestion snapshot: a 16-level grid (0, 17, …, 255 per channel; 4,096
 /// colors) plus 1,000 further distinct colors off the grid, from a SplitMix64 sequence using its high
-/// bits. (The 2023 recorder took the low byte of an LCG, which repeats after 256 colors.)
+/// bits.
 pub fn suggestion_colors() -> Vec<[u8; 3]> {
     let mut colors: Vec<[u8; 3]> = Vec::with_capacity(5096);
     for r in (0..=255u16).step_by(17) {
@@ -263,9 +262,9 @@ fn transparent() -> Fixture {
     })
 }
 
-/// Seed of the ΔE fingerprint corpus (R11).
+/// Seed of the ΔE fingerprint corpus.
 pub const FINGERPRINT_SEED: u64 = 0x5eed;
-/// Number of color pairs in the ΔE fingerprint (R11, owner answer F1 a).
+/// Number of color pairs in the ΔE fingerprint.
 pub const FINGERPRINT_PAIRS: usize = 100_000;
 
 /// Pairs whose ΔE is recorded exactly (as `f32` bits) beside the fingerprint hash.
@@ -275,7 +274,7 @@ pub const FINGERPRINT_EXACT: &[(&str, [u8; 3], [u8; 3])] = &[
     // The exact tie used by the earlier-mapping tests (core, WASM, TS contract): same bits.
     ("tie-a", [128, 128, 128], [0, 2, 227]),
     ("tie-b", [128, 128, 128], [0, 4, 0]),
-    // The pair that tied exactly natively before R11 (lab + deltae), but not in WASM.
+    // A pair that tied exactly with the `lab` + `deltae` crates natively, but not in WASM.
     ("old-tie-a", [128, 128, 128], [100, 140, 117]),
     ("old-tie-b", [128, 128, 128], [101, 101, 135]),
 ];

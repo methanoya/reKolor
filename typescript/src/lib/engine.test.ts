@@ -65,7 +65,7 @@ describe('Engine', () => {
     });
     expect(value(engine.colorCount(WHITE))).toBe(2);
 
-    // Zero picks (the engine's I8 c): the image as printed on white; the app shows nothing then (U10).
+    // Zero picks: the engine gives the image as printed on white; the app shows nothing then.
     expect([...value(engine.recolor([], WHITE))]).toEqual([230, 76, 60, 255, 255, 255, 255, 255]);
     const ink = { r: 58, g: 117, b: 196 };
     const out = value(engine.recolor([{ source: { r: 230, g: 76, b: 60 }, ink }], WHITE));
@@ -114,7 +114,7 @@ describe('Engine', () => {
     const engine = value(Engine.create(palette));
     const matches = value(engine.nearest({ r: 0, g: 63, b: 84 }));
     expect(matches).toHaveLength(ALTERNATIVES);
-    // Same RGB: file order decides (I7).
+    // Same RGB: file order decides.
     expect(matches.slice(0, 2).map((m) => m.name)).toEqual(['Pantone 303', 'Pantone 547']);
     expect(matches.map((m) => m.deltaE)).toEqual(
       [...matches.map((m) => m.deltaE)].sort((a, b) => a - b),
@@ -168,7 +168,7 @@ describe('Engine', () => {
   });
 });
 
-describe('Engine configs (W10 v)', () => {
+describe('Engine configs', () => {
   const sample = () =>
     readFile(
       new URL('../../../samples/others/icon-calendar.palettes.toml', import.meta.url),
@@ -179,7 +179,7 @@ describe('Engine configs (W10 v)', () => {
     const engine = value(Engine.create(palette));
     const parsed = value(engine.parseConfig(await sample()));
     expect(parsed.sections.map((s) => s.size)).toEqual([3, 7, 16]);
-    expect(parsed.material).toEqual(WHITE); // no `material` line: white (M4.1 a)
+    expect(parsed.material).toEqual(WHITE); // no `material` line: white
     const section = parsed.sections[1]!;
     const resolved = value(engine.resolveSection(section, parsed.material));
     expect(resolved.map((p) => p.ink.name)).toEqual(section.picks.map((p) => p.ink));
@@ -199,7 +199,7 @@ describe('Engine configs (W10 v)', () => {
     engine.dispose();
   });
 
-  test('unprinted colors are exported and read back (K8)', () => {
+  test('unprinted colors are exported and read back', () => {
     const engine = value(Engine.create(palette));
     const unprinted = [
       { kind: 'material' as const, deltaE: 10 },

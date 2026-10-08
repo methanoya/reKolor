@@ -1,4 +1,4 @@
-// Moving a pick by Shift-dragging its marker (`.agents/repositioning`): the order and coalescing of
+// Moving a pick by Shift-dragging its marker: the order and coalescing of
 // the live updates, the cancel, and the marker drawn while a drag is in progress. The pick-list
 // work itself is injected, so the rules are testable in Node with controlled promises.
 

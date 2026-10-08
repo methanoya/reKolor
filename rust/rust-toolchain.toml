@@ -1,4 +1,4 @@
-# R13: floating stable, with the WASM target and the components the checks use.
+# Floating stable, with the WASM target and the components the checks use.
 [toolchain]
 channel = "stable"
 targets = ["wasm32-unknown-unknown"]

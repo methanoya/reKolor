@@ -1,4 +1,4 @@
-//! Palette config import/export for the web app (W10 v): thin wrappers over `rekolor-config`, so
+//! Palette config import/export for the web app: thin wrappers over `rekolor-config`, so
 //! the app reads, validates and writes `*.palettes.toml` exactly like the CLI.
 
 use rekolor_config as config;
@@ -25,7 +25,7 @@ pub struct ConfigSection {
     pub picks: Vec<ConfigPick>,
 }
 
-/// A color left unprinted, as in a config (material-color K8): a stored pixel color, or the
+/// A color left unprinted, as in a config: a stored pixel color, or the
 /// material's own color (whatever the material is).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Tsify)]
 #[serde(tag = "kind", rename_all = "camelCase")]

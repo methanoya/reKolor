@@ -1,4 +1,4 @@
-//! Palette config files: `*.palettes.toml` (X1, W10 v). Shared by the CLI (golden set) and the web
+//! Palette config files: `*.palettes.toml`. Shared by the CLI (golden set) and the web
 //! app (import/export through `rekolor-wasm`), so both read and validate files the same way.
 //!
 //! ```toml
@@ -16,8 +16,8 @@
 //! ```
 //!
 //! `material` is the color the picks are composited over (the garment or substrate): read as white
-//! when absent, always written (material-color decisions M4 b, M4.1 a). `unprinted` lists the colors
-//! left unprinted (U1, K8): a stored pixel color and a ΔE, or the material's own color
+//! when absent, always written. `unprinted` lists the colors
+//! left unprinted: a stored pixel color and a ΔE, or the material's own color
 //! (`material = true`, which follows the material); none when absent, always written. Both apply to
 //! every section. Each pick is a pixel color (straight-alpha RGBA, as stored in the image) and the
 //! palette entry it maps to, by name. "Size" is the requested number of distinct inks; a palette
@@ -30,7 +30,7 @@ use std::collections::HashSet;
 use rekolor_core::{Mapping, MaterialRange, Palette, Rgb8, Rgba8, composite};
 use serde::Deserialize;
 
-/// Largest accepted config text (owner decision WA1 a).
+/// Largest accepted config text.
 pub const MAX_BYTES: usize = 256 * 1024;
 /// Most `[[palette]]` sections in one config.
 pub const MAX_SECTIONS: usize = 64;
@@ -53,7 +53,7 @@ pub struct PaletteConfig {
     pub palette: Vec<SizedPalette>,
 }
 
-/// A color left unprinted (material-color U1, K8): pixels within `delta_e` (CIEDE2000) of it take
+/// A color left unprinted: pixels within `delta_e` (CIEDE2000) of it take
 /// no ink. In the file: `{ rgba = [r, g, b, a], delta_e = 10 }` or `{ material = true, delta_e = 10 }`.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(try_from = "RawUnprinted")]
@@ -442,7 +442,7 @@ mod tests {
 
     #[test]
     fn rejects_more_distinct_inks_than_the_size() {
-        // Review fix F4: size N means up to N distinct inks.
+        // Size N means up to N distinct inks.
         let err = PaletteConfig::parse(&sized(3, &["A", "B", "C", "D"])).unwrap_err();
         assert_eq!(err, ConfigError::TooManyInks { size: 3, inks: 4 });
         assert!(err.to_string().contains("4 distinct inks"));

@@ -1,7 +1,7 @@
 {
   "name": "rekolor-wasm-contract-test",
   "private": true,
-  "description": "TypeScript contract test for the rekolor-wasm package (X3 c): imports the built package as an app would and type-checks against its generated .d.ts",
+  "description": "TypeScript contract test for the rekolor-wasm package: imports the built package as an app would and type-checks against its generated .d.ts",
   "type": "module",
   "scripts": {
     "build:wasm": "wasm-pack build .. --release --target web",

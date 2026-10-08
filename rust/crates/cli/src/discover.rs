@@ -1,4 +1,4 @@
-//! Finding the input images in a samples tree (X1).
+//! Finding the input images in a samples tree.
 
 use std::path::{Path, PathBuf};
 

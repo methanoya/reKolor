@@ -1,12 +1,10 @@
-//! Color matching and recoloring on raw RGBA8 buffers (R1, R3, R4).
+//! Color matching and recoloring on raw RGBA8 buffers.
 //!
 //! Pure functions only: no file I/O, no printing, and no dependency on wasm-bindgen, tsify or
 //! `image`. Decoding, encoding and the browser boundary live in the other workspace crates.
-//! Optional debug traces go through the `log` facade (R7).
+//! Optional debug traces go through the `log` facade.
 //!
-//! Behavior reproduces the existing implementation exactly (R9), checked against the recorded
-//! baseline in `rust/testdata/baseline/`. Known behavior issues are changed later, one decision
-//! at a time.
+//! Behavior is checked against the recorded baseline in `rust/testdata/baseline/`.
 
 mod analyze;
 mod color;

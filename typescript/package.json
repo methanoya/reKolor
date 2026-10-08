@@ -1,7 +1,7 @@
 {
   "name": "rekolor-web",
   "private": true,
-  "description": "reKolor web app: preview a picture printed with a limited ink palette (Svelte 5 + the rekolor-wasm package in a Web Worker)",
+  "description": "reKolor web app: preview a picture printed with a limited ink palette (Svelte + the rekolor-wasm package in a Web Worker)",
   "type": "module",
   "scripts": {
     "wasm": "wasm-pack build ../rust/crates/wasm --release --target web",

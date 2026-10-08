@@ -27,7 +27,7 @@ import { imageLimitError } from './limits';
 import { err, ok, type AppOutcome } from './outcome';
 import { parsePaletteJson } from './palette';
 
-/** Number of ink alternatives offered per pick (owner decision WA2 a). */
+/** Number of ink alternatives offered per pick. */
 export const ALTERNATIVES = 8;
 
 export interface ImageSize {
@@ -110,7 +110,7 @@ export class Engine {
     return outcome.status === 'ok' ? ok(outcome.value.colors) : outcome;
   }
 
-  /** The stored pixel at (x, y), its matching color on the material and suggested ink (R10). */
+  /** The stored pixel at (x, y), its matching color on the material and suggested ink. */
   pick(x: number, y: number, material: Rgb, seen?: Rgba): AppOutcome<Pick> {
     if (!this.#image) return err('noImage', 'no image is open');
     return fromWasm(this.#image.pick(x, y, seen, material, this.#palette));
@@ -127,7 +127,7 @@ export class Engine {
     return outcome.status === 'ok' ? ok(outcome.value.matches) : outcome;
   }
 
-  /** Parses and validates a palette config (`*.palettes.toml`, W10 v), like the CLI does. */
+  /** Parses and validates a palette config (`*.palettes.toml`), like the CLI does. */
   parseConfig(text: string): AppOutcome<ParsedConfig> {
     return fromWasm(parseConfig(text));
   }
@@ -157,7 +157,7 @@ export class Engine {
 
   /**
    * Recolors the current image on the material into a new opaque RGBA buffer (transferable to the
-   * main thread). Pixels within a material range take no ink and are transparent (U1, U8).
+   * main thread). Pixels within a material range take no ink and are transparent.
    */
   recolor(
     mappings: Mapping[],

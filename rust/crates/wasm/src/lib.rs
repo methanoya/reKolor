@@ -1,12 +1,12 @@
-//! The browser interface over `rekolor-core` (T1–T7): a thin adapter that converts between
+//! The browser interface over `rekolor-core`: a thin adapter that converts between
 //! TypeScript-facing types and core types. No color logic lives here.
 //!
 //! Interface rules:
-//! - pixel buffers cross as typed arrays (`Uint8Array`), with lengths checked in Rust (T3);
+//! - pixel buffers cross as typed arrays (`Uint8Array`), with lengths checked in Rust;
 //! - structured values cross as tsify types wrapped in `Ts<T>`, converted *inside* each
-//!   function, so malformed input becomes an error value instead of a trap or a leak (T2);
-//! - domain errors are returned as `Outcome<T>` values, never thrown (T5);
-//! - field names are camelCase on the TypeScript side (T6).
+//!   function, so malformed input becomes an error value instead of a trap or a leak;
+//! - domain errors are returned as `Outcome<T>` values, never thrown;
+//! - field names are camelCase on the TypeScript side.
 //!
 //! Must never depend on `rekolor-io` (that would pull the `image` crate into the WASM build).
 
@@ -36,8 +36,8 @@ pub use types::{
 use wasm_bindgen::prelude::*;
 
 /// Runs once when the module is instantiated: Rust panics (bugs, never input errors) are printed
-/// with their message to `console.error`, in production too (R8); `log` traces go to the console
-/// at warning level and above (R7).
+/// with their message to `console.error`, in production too; `log` traces go to the console
+/// at warning level and above.
 #[wasm_bindgen(start, skip_typescript)]
 fn start() {
     console_error_panic_hook::set_once();

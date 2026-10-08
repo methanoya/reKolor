@@ -1,4 +1,4 @@
-/// Everything that can go wrong with caller-supplied input (R8). Input never causes a panic.
+/// Everything that can go wrong with caller-supplied input. Input never causes a panic.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {

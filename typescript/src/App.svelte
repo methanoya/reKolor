@@ -55,7 +55,7 @@
   let requested = 0;
   /**
    * The generation of the image that is open, set only when an open succeeds, so a failed
-   * replacement keeps the previous image usable (review fix). Results for others are ignored.
+   * replacement keeps the previous image usable. Results for others are ignored.
    */
   let generation = 0;
   /** Incremented per pick change; only the current revision's result is shown or downloaded. */
@@ -70,7 +70,7 @@
   let recoloring = $state(false);
   let picks = $state<PickEntry[]>([]);
   let nextPickId = 1;
-  /** Pick-list changes run one at a time, in the order of the user's actions (review fix). */
+  /** Pick-list changes run one at a time, in the order of the user's actions. */
   const mutations = new Serial();
   /** The pick being Shift-dragged: its marker follows the pointer until the move settles. */
   let moving = $state<Marker>();
@@ -87,7 +87,7 @@
    * no input came after it, so the input never jumps back from a newer choice.
    */
   let materialInputs = 0;
-  /** Colors left unprinted (U1): pixels within ΔE of them take no ink; the material shows. */
+  /** Colors left unprinted: pixels within ΔE of them take no ink; the material shows. */
   let ranges = $state<RangeEntry[]>([]);
   let nextRangeId = 1;
   /** The next click on the original adds a material range instead of a pick. */
@@ -100,7 +100,7 @@
   let materialChosen = $state(false);
   /** The ΔE a new material range starts with. */
   const RANGE_DELTA_E = 10;
-  /** The ΔE slider's usual maximum; files may hold up to 100 (K10). */
+  /** The ΔE slider's usual maximum; files may hold up to 100. */
   const RANGE_SLIDER_MAX = 40;
 
   let view = $state<View>({ scale: 1, x: 0, y: 0 });
@@ -223,9 +223,9 @@
 
   // ── Moving a pick (Shift-drag on its marker) ───────────────────────────────────────────────────
   // Live: each new pixel re-picks the color and re-suggests the ink, like a click there, and the
-  // preview follows; within the same color the ink is kept (C1 a). A pixel whose color another pick
-  // already has is skipped; on release the pick stays at its last valid pixel (F2 a). Escape or a
-  // lost pointer cancels: the pick is put back as it was (F1 a). Ordering and coalescing: `Mover`.
+  // preview follows; within the same color the ink is kept. A pixel whose color another pick
+  // already has is skipped; on release the pick stays at its last valid pixel. Escape or a
+  // lost pointer cancels: the pick is put back as it was. Ordering and coalescing: `Mover`.
 
   const mover = new Mover<{ pick: PickEntry; material: Rgb }>({
     queue: (task) => mutations.run(task),
@@ -297,12 +297,12 @@
     if (recolored) requestRecolor();
   }
 
-  // ── Material (material-color M1–M6, C1): the color the image is composited over ─────────────
+  // ── Material: the color the image is composited over ───────────────────────────────────────────
   // Live while the picker is open: inputs coalesce into the queued material change while it hasn't
   // started and nothing else was queued after it (`Serial.coalescing`), so a burst is one change and
-  // never passes another action. Applying re-matches the picks on the new material (M3 a): a pick
+  // never passes another action. Applying re-matches the picks on the new material: a pick
   // whose color changed gets the nearest ink again, the others keep theirs. Picks that now share a
-  // color are kept (M3.1 b).
+  // color are kept.
 
   const queueMaterial = mutations.coalescing(applyMaterial);
 
@@ -311,7 +311,7 @@
     queueMaterial({ color, input: ++materialInputs });
   }
 
-  /** Back to "none" (U11): the picks are re-matched on white, the material's own entry goes. */
+  /** Back to "none": the picks are re-matched on white, the material's own entry goes. */
   function resetMaterial() {
     materialInput = hex(WHITE);
     queueMaterial({ color: WHITE, input: ++materialInputs, reset: true });
@@ -353,7 +353,7 @@
       ranges = ranges.filter((r) => !r.material);
       status = `Material reset${changes}.`;
     } else {
-      // Choosing a material (even the one in use) leaves its own color unprinted (U7).
+      // Choosing a material (even the one in use) leaves its own color unprinted.
       materialChosen = true;
       setMaterialRange(next);
       status = `Material ${hex(next)}${changes}.`;
@@ -363,7 +363,7 @@
   }
 
   /**
-   * The material's own color as a range with the default ΔE (U7): added if missing (also
+   * The material's own color as a range with the default ΔE: added if missing (also
    * after being removed), otherwise moved to the new color with its ΔE kept.
    */
   function setMaterialRange(color: Rgb) {
@@ -383,7 +383,7 @@
   }
 
   /**
-   * The picks re-matched on `on` (M3 a), in order: a pick whose composited color changed gets the
+   * The picks re-matched on `on`, in order: a pick whose composited color changed gets the
    * nearest ink and alternatives, as a fresh click would; the others are returned unchanged.
    * `undefined` if the engine call failed (the error is shown).
    */
@@ -407,10 +407,10 @@
     });
   }
 
-  // ── Colors left unprinted (U1–U8): no ink there, the material shows instead ───────────────────
+  // ── Colors left unprinted: no ink there, the material shows instead ────────────────────────────
   // A range is a pixel from the original and a ΔE: every pixel whose color (composited over the
   // material, in Rust) is within that ΔE of the range's pixel takes no ink and is transparent in
-  // the result, so the material shows through (U8). Ranges are checked before the picks (K1).
+  // the result, so the material shows through. Ranges are checked before the picks.
 
   /** Adds a material range at the clicked pixel (queued like a pick: it reads the material). */
   function addRange(x: number, y: number, seen: Rgba | undefined) {
@@ -441,7 +441,7 @@
   }
 
   // Entry changes are queued like pick changes, so they keep their place among material changes
-  // and imports (GPT review 3). A slider drag is one change per burst: one coalescer per entry.
+  // and imports. A slider drag is one change per burst: one coalescer per entry.
   const deltaQueues = new SvelteMap<number, (deltaE: number) => void>();
 
   function setRangeDeltaE(id: number, deltaE: number) {
@@ -491,7 +491,7 @@
       picks = [];
     });
 
-  // ── Palette configs (W10 v): import replaces the picks only after everything validated ──────────
+  // ── Palette configs: import replaces the picks only after everything validated ─────────────────
   let configInput: HTMLInputElement;
   let sizeDialog: HTMLDialogElement;
   let configSections = $state<ConfigSection[]>([]);
@@ -555,8 +555,8 @@
 
   /**
    * Resolves a section on the config's material and replaces the picks, the material and the
-   * unprinted colors in one step (runs inside `mutations`): the file is the whole state (K9).
-   * Duplicates in the file are kept, as written (C4 a). `inputs`: the material inputs made before
+   * unprinted colors in one step (runs inside `mutations`): the file is the whole state.
+   * Duplicates in the file are kept, as written. `inputs`: the material inputs made before
    * the import was chosen.
    */
   async function applySection(
@@ -583,7 +583,7 @@
     const materialChanged = !sameRgb(fileMaterial, material);
     material = fileMaterial;
     // Imported entries have no square: like imported picks, they weren't clicked.
-    // A value above the slider's usual range widens that entry's slider (R2 a, GPT review 4).
+    // A value above the slider's usual range widens that entry's slider.
     const maxDeltaE = (deltaE: number) => (deltaE > RANGE_SLIDER_MAX ? 100 : RANGE_SLIDER_MAX);
     ranges = unprinted.map((u) =>
       u.kind === 'material'
@@ -596,8 +596,8 @@
           }
         : { id: nextRangeId++, pixel: u.rgba, deltaE: u.deltaE, maxDeltaE: maxDeltaE(u.deltaE) },
     );
-    // K6, K9: the file decides, "none" included; a white material can't tell a choice from the
-    // default unless its own color is listed (GPT review 2).
+    // The file decides, "none" included; a white material can't tell a choice from the default
+    // unless its own color is listed.
     materialChosen = !sameRgb(fileMaterial, WHITE) || unprinted.some((u) => u.kind === 'material');
     // A material chosen after the import is queued behind it and already shown.
     if (inputs === materialInputs) materialInput = hex(fileMaterial);
@@ -632,12 +632,12 @@
     save(new Blob([exported.value], { type: 'application/toml' }), `${stem(name)}.palettes.toml`);
   }
 
-  // ── Live recolor (W10 vi a): one in flight, one pending; stale results dropped ─────────────────
+  // ── Live recolor: one in flight, one pending; stale results dropped ────────────────────────────
   interface RecolorRequest {
     generation: number;
     revision: number;
     mappings: ReturnType<typeof mappings>;
-    /** The material these mappings were made on: a result never mixes two materials (C2 a). */
+    /** The material these mappings were made on: a result never mixes two materials. */
     material: Rgb;
     materialRanges: { pixel: Rgba; deltaE: number }[];
   }
@@ -670,7 +670,7 @@
     if (!image) return;
     revision++;
     if (picks.length === 0) {
-      // U10: nothing is printed before the first pick; the preview shows only the material (or the
+      // Nothing is printed before the first pick; the preview shows only the material (or the
       // checkerboard), and there is nothing to download. Older results are dropped (revision).
       result?.close();
       result = undefined;
@@ -686,7 +686,7 @@
     });
   }
 
-  // ── Download (W9 a): always the current revision at full resolution ───────────────────────────
+  // ── Download: always the current revision at full resolution ───────────────────────────────────
   async function download() {
     if (!file) return;
     // The name and image at the moment of the click; nothing is saved if either changes.
@@ -696,7 +696,7 @@
     const rev = revision;
     if (gen !== generation || resultRevision !== rev) return;
     const png: AppOutcome<Blob> = await client.call((api) => api.encodePng(gen, rev));
-    if (gen !== generation || rev !== revision) return; // changed while encoding (review fix)
+    if (gen !== generation || rev !== revision) return; // changed while encoding
     if (png.status === 'error') {
       if (png.error.kind !== 'superseded') error = png.error.message;
       return;
@@ -715,7 +715,7 @@
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
   }
 
-  // ── Zoom (W10 iv a): one view for both canvases ──────────────────────────────────────────────
+  // ── Zoom: one view for both canvases ───────────────────────────────────────────────────────────
   function setViewport(size: Size) {
     if (size.width === 0 || size.height === 0) return;
     const before = viewport;
@@ -733,7 +733,7 @@
     view = zoomAt(view, 1 / view.scale, viewport.width / 2, viewport.height / 2);
   };
 
-  // ── Files: chooser, drag and drop, paste (W10 iii) ───────────────────────────────────────────
+  // ── Files: chooser, drag and drop, paste ───────────────────────────────────────────────────────
   let fileInput: HTMLInputElement;
   let dragging = $state(false);
 

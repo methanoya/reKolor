@@ -1,5 +1,5 @@
-//! `core` must match the baseline snapshot in `testdata/baseline/` pixel for pixel (P1: current
-//! approved behavior; first recorded from the 2023 crate at commit `c0d094c`). Inputs come from
+//! `core` must match the baseline snapshot in `testdata/baseline/` pixel for pixel (the current
+//! approved behavior). Inputs come from
 //! `testdata/generator.rs`. After an intentional change:
 //! `cargo run --release -p rekolor-core --example update_baseline`, review the diff, commit.
 
@@ -34,7 +34,7 @@ fn decode_png(path: &Path) -> (u32, u32, Vec<u8>) {
     (info.width, info.height, buf)
 }
 
-/// Pixel comparison with a readable report (X2): the number of differing pixels and the first
+/// Pixel comparison with a readable report: the number of differing pixels and the first
 /// few with expected/actual colors.
 fn compare_pixels(label: &str, width: u32, expected: &[u8], actual: &[u8]) -> Result<(), String> {
     assert_eq!(expected.len(), actual.len(), "{label}: buffer length");

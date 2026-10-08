@@ -2,7 +2,7 @@ import type { PaletteData } from 'rekolor-wasm';
 
 /**
  * Converts `palettes/pantone.json` (`{ "<name>": { "rgb": [r, g, b] }, … }`) to the WASM package's
- * `PaletteData`. `Object.entries` keeps file order, which decides ties (I7).
+ * `PaletteData`. `Object.entries` keeps file order, which decides ties.
  */
 export function parsePaletteJson(text: string): PaletteData {
   const json: unknown = JSON.parse(text);

@@ -26,17 +26,17 @@ reloaded. `REKOLOR_WASM_WATCH=0 npm run dev` turns that off.
 
 ## Scripts
 
-| Script                 | What                                                                                                                                                                                                 |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `npm run wasm`         | Builds the WASM package.                                                                                                                                                                             |
-| `npm run dev`          | Dev server.                                                                                                                                                                                          |
-| `npm run build`        | Production build in `dist/` (base path `/`).                                                                                                                                                         |
-| `npm run build:pages`  | Production build for GitHub Pages under `/reKolor/` (`REKOLOR_BASE` overrides the base).                                                                                                             |
-| `npm run check`        | `svelte-check` (TypeScript and Svelte), warnings fail.                                                                                                                                               |
-| `npm run lint`         | ESLint and Prettier.                                                                                                                                                                                 |
-| `npm test`             | Node tests (Vitest): the engine against the real WASM package, scheduling, zoom math, limits.                                                                                                        |
-| `npm run test:browser` | Browser tests (Vitest browser mode, Playwright: Chromium, Firefox, WebKit): decoding vs Rust (M2), the real worker, the app end to end. Needs `npx playwright install chromium firefox webkit` once. |
-| `npm run smoke`        | Builds for `/reKolor/`, serves it and drives it in Chromium (worker, WASM and palette paths).                                                                                                        |
+| Script                 | What                                                                                                                                                                                            |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run wasm`         | Builds the WASM package.                                                                                                                                                                        |
+| `npm run dev`          | Dev server.                                                                                                                                                                                     |
+| `npm run build`        | Production build in `dist/` (base path `/`).                                                                                                                                                    |
+| `npm run build:pages`  | Production build for GitHub Pages under `/reKolor/` (`REKOLOR_BASE` overrides the base).                                                                                                        |
+| `npm run check`        | `svelte-check` (TypeScript and Svelte), warnings fail.                                                                                                                                          |
+| `npm run lint`         | ESLint and Prettier.                                                                                                                                                                            |
+| `npm test`             | Node tests (Vitest): the engine against the real WASM package, scheduling, zoom math, limits.                                                                                                   |
+| `npm run test:browser` | Browser tests (Vitest browser mode, Playwright: Chromium, Firefox, WebKit): decoding vs Rust, the real worker, the app end to end. Needs `npx playwright install chromium firefox webkit` once. |
+| `npm run smoke`        | Builds for `/reKolor/`, serves it and drives it in Chromium (worker, WASM and palette paths).                                                                                                   |
 
 ## How it works
 
@@ -47,11 +47,11 @@ main thread (Svelte)                      worker (src/lib/worker.ts)
   PickList                                    └─ Engine (engine.ts) ── rekolor-wasm
 ```
 
-- **Decoding** happens in the browser (R5), inside the worker: EXIF orientation applied, the color
+- **Decoding** happens in the browser, inside the worker: EXIF orientation applied, the color
   profile converted to sRGB. The size limits (50 MB file, 16,384 px per side, 24 megapixels) are
   checked before any pixel buffer is made.
 - **Picking:** a click maps through the zoom/pan transform to a source pixel; Rust reads the stored
-  pixel, composites it over the material and suggests the nearest ink (R10). At 100 % and above the color
+  pixel, composites it over the material and suggests the nearest ink. At 100 % and above the color
   on screen is sent too, and Rust warns if it differs from the stored pixel.
 - **Moving a pick:** hold Shift and drag its circle (`src/lib/moves.ts`). The pick follows the
   pointer pixel by pixel, re-picked as if clicked there, with the nearest ink for each new color;
@@ -100,7 +100,7 @@ main thread (Svelte)                      worker (src/lib/worker.ts)
   the material's own color as unprinted.
 - **Errors** come back as values (`AppOutcome`); a crashed worker is restarted and the user is told.
 
-## Browser differences found by the cross-decoder test (M2)
+## Browser differences found by the cross-decoder test
 
 `tests/browser/decoders.test.ts` compares the browser's decoding with `rekolor-io` on the fixtures in
 `../rust/testdata/decoders/` (regenerate with

@@ -1,4 +1,4 @@
-# The Rust workspace (R1, R2).
+# The Rust workspace.
 [workspace]
 resolver = "3"
 members = ["crates/core", "crates/config", "crates/wasm", "crates/io", "crates/cli"]
@@ -10,8 +10,8 @@ authors = ["Metan"]
 publish = false
 
 [workspace.dependencies]
-# For `rekolor-io` (task step 7). All readable formats; the default "avif" feature is left out
-# because it is only an AVIF encoder (see "Image formats" in the decisions).
+# For `rekolor-io`. All readable formats; the default "avif" feature is left out because it is
+# only an AVIF encoder.
 image = { version = "0.25.10", default-features = false, features = [
     "rayon",
     "bmp", "dds", "exr", "ff", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "tga", "tiff", "webp",

@@ -1,4 +1,4 @@
-// X3 (c): the rekolor-wasm contract as an app sees it, at runtime.
+// The rekolor-wasm contract as an app sees it, at runtime.
 // Type-level guarantees are in `types.check.ts` (checked by `tsc`, not run).
 
 import { readFile } from 'node:fs/promises';
@@ -50,7 +50,7 @@ describe('Palette', () => {
     const palette = unwrap(Palette.create(await pantoneData()));
     expect(palette.length).toBe(909);
 
-    // The 2023 JS suggested Pantone 1235 for this color (see testdata/baseline).
+    // A saturated yellow: Pantone 1235 is its nearest entry.
     const yellow = unwrap(palette.suggest({ r: 255, g: 184, b: 0 }));
     expect(yellow).toMatchObject({ name: 'Pantone 1235', nonPalette: false });
     expect(yellow.rgb).toEqual({ r: 252, g: 181, b: 20 });
@@ -62,7 +62,7 @@ describe('Palette', () => {
     const twins = unwrap(palette.nearest({ r: 0, g: 63, b: 84 }, 2)).matches;
     expect(twins.map((m) => m.name)).toEqual(['Pantone 303', 'Pantone 547']);
     expect(twins[0]!.index).toBeLessThan(twins[1]!.index);
-    // I7: the suggestion follows the same rule.
+    // The suggestion follows the same rule.
     expect(unwrap(palette.suggest({ r: 0, g: 63, b: 84 })).name).toBe('Pantone 303');
     palette.free();
   });
@@ -110,7 +110,7 @@ describe('SourceImage', () => {
   });
 
   test('zero mappings give the composited copy; one mapping turns everything into its ink', () => {
-    // I8 contract. Pixel 2 is fully transparent, so it composites to white.
+    // Pixel 2 is fully transparent, so it composites to white.
     const image = redAndTransparent();
     const out = new Uint8Array(8);
 
@@ -124,7 +124,7 @@ describe('SourceImage', () => {
     expect([...out]).toEqual([58, 117, 196, 255, 58, 117, 196, 255]);
   });
 
-  test('ties go to the earlier mapping (I9)', () => {
+  test('ties go to the earlier mapping', () => {
     // Exact matches: one source, two inks.
     const red = redAndTransparent();
     const out = new Uint8Array(8);
@@ -216,7 +216,7 @@ describe('SourceImage', () => {
   });
 
   test('numbers that are not whole, finite, non-negative 32-bit values are error values', () => {
-    // Review fix F1: wasm-bindgen would otherwise truncate/wrap them into valid-looking values.
+    // wasm-bindgen would otherwise truncate/wrap them into valid-looking values.
     const one = new Uint8Array([5, 6, 7, 255]);
     for (const [w, h] of [[1.5, 1], [4294967297, 1], [NaN, 1], [Infinity, 1], [-1, 1], [1, 0.5]]) {
       const created = SourceImage.create(one, w!, h!);
@@ -253,7 +253,7 @@ describe('SourceImage', () => {
   });
 });
 
-describe('palette configs (W10 v)', () => {
+describe('palette configs', () => {
   test('a golden-set config parses, resolves against the palette and round-trips', async () => {
     const text = await readFile(
       new URL('../../../../../samples/good-looking/04-tiger.palettes.toml', import.meta.url),
@@ -261,7 +261,7 @@ describe('palette configs (W10 v)', () => {
     );
     const parsed = unwrap(parseConfig(text));
     expect(parsed.sections.map((s) => s.size)).toEqual([3, 7, 16]);
-    // No `material` line in the golden configs: white (M4.1 a).
+    // No `material` line in the golden configs: white.
     expect(parsed.material).toEqual(WHITE);
     const section = parsed.sections[0]!;
 
@@ -274,7 +274,7 @@ describe('palette configs (W10 v)', () => {
       serializeConfig({ imageName: 'tiger.png', material: parsed.material, picks: section.picks }),
     ).text;
     expect(exported).toMatch(/^# Palette exported from the reKolor web app for tiger\.png\./);
-    // Always written (M4 b).
+    // Always written.
     expect(exported).toContain('\nmaterial = [255, 255, 255]\n');
     expect(unwrap(parseConfig(exported))).toEqual({
       material: WHITE,
@@ -325,7 +325,7 @@ describe('the material color', () => {
     expect(transparent.suggestion.name).toBe('Pure Black (non-palette)');
     expect(unwrap(image.pick(2, 0, undefined, BLACK, palette)).matching).toEqual({ r: 79, g: 0, b: 0 });
 
-    // No mappings: the image as it looks on the material (I8 c).
+    // No mappings: the image as it looks on the material.
     const out = new Uint8Array(12);
     unwrap(image.recolor({ mappings: [], material: BLACK }, out));
     expect([...out]).toEqual([0, 0, 0, 255, 230, 76, 60, 255, 79, 0, 0, 255]);
@@ -397,7 +397,7 @@ describe('the material color', () => {
   });
 });
 
-describe('unprinted colors in configs (material-color K8)', () => {
+describe('unprinted colors in configs', () => {
   test('are read as a tagged union and written back, always', () => {
     const text =
       'material = [0, 0, 0]\nunprinted = [\n' +

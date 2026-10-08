@@ -15,8 +15,8 @@ extern "C" {
     pub type SourceImageOutcome;
 }
 
-/// The source image kept on the WASM side (T1): its pixels are copied in once and every later
-/// call works on them, so picks always read the real source pixel (R10).
+/// The source image kept on the WASM side: its pixels are copied in once and every later
+/// call works on them, so picks always read the real source pixel.
 #[wasm_bindgen]
 #[derive(Debug)]
 pub struct SourceImage {
