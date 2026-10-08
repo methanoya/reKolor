@@ -96,6 +96,44 @@ mod tests {
         }
     }
 
+    /// Sharma, Wu and Dalal (2005), "The CIEDE2000 color-difference formula: implementation notes,
+    /// supplementary test data, and mathematical observations": 34 pairs of Lab colors with their
+    /// ΔE to 4 decimals. File: `testdata/ciede2000-sharma.csv`, the values of
+    /// <https://hajim.rochester.edu/ece/sites/gsharma/ciede2000/dataNprograms/ciede2000testdata.txt>
+    /// unchanged, as CSV with a header row.
+    #[test]
+    fn delta_e_matches_the_sharma_reference_data() {
+        let data = include_str!("../../../testdata/ciede2000-sharma.csv");
+        let mut failures = Vec::new();
+        let mut pairs = 0;
+        for line in data.lines().skip(1) {
+            let v: Vec<f32> = line.split(',').map(|x| x.parse().unwrap()).collect();
+            let x = LabValue {
+                l: v[0],
+                a: v[1],
+                b: v[2],
+            };
+            let y = LabValue {
+                l: v[3],
+                a: v[4],
+                b: v[5],
+            };
+            let actual = delta(x, y);
+            // The reference is rounded to 4 decimals, so allow half a unit plus f32 error.
+            if (actual - v[6]).abs() > 1e-4 {
+                failures.push(format!("{line}: expected {}, got {actual}", v[6]));
+            }
+            pairs += 1;
+        }
+        assert_eq!(pairs, 34);
+        assert!(
+            failures.is_empty(),
+            "{} of 34 pairs differ:\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
+    }
+
     #[test]
     fn delta_e_is_zero_for_identical_colors_and_positive_otherwise() {
         let red = Rgb8::new(230, 76, 60);
