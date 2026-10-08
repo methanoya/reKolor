@@ -228,6 +228,34 @@ fn noise() -> Fixture {
     }
 }
 
+/// Colors for the Pantone suggestion snapshot: a 16-level grid (0, 17, …, 255 per channel; 4,096
+/// colors) plus 1,000 further distinct colors off the grid, from a SplitMix64 sequence using its high
+/// bits. (The 2023 recorder took the low byte of an LCG, which repeats after 256 colors.)
+pub fn suggestion_colors() -> Vec<[u8; 3]> {
+    let mut colors: Vec<[u8; 3]> = Vec::with_capacity(5096);
+    for r in (0..=255u16).step_by(17) {
+        for g in (0..=255u16).step_by(17) {
+            for b in (0..=255u16).step_by(17) {
+                colors.push([r as u8, g as u8, b as u8]);
+            }
+        }
+    }
+    let mut seen: std::collections::HashSet<[u8; 3]> = colors.iter().copied().collect();
+    let mut state: u64 = 0x5eed_c0de_0000_0001;
+    while colors.len() < 4096 + 1000 {
+        state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^= z >> 31;
+        let color = [(z >> 56) as u8, (z >> 48) as u8, (z >> 40) as u8];
+        if seen.insert(color) {
+            colors.push(color);
+        }
+    }
+    colors
+}
+
 /// Fully transparent pixels with different hidden RGB values.
 fn transparent() -> Fixture {
     image("transparent", 16, 16, |x, y| {

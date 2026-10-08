@@ -11,7 +11,7 @@ package it produces.
 | `crates/io` (`rekolor-io`) | Native decoding of every readable `image` format to RGBA8 (EXIF orientation applied), PNG encoding, and the decoder-discrepancy warnings (M1) as data. | — |
 | `crates/cli` (`rekolor-cli`, binary `rekolor`) | Command-line tool on top of `io` and `core`; also a small library (configs, palette loading, config generation, discovery) used by the golden test. | — |
 
-Shared test data lives in `testdata/` (see [Baseline](#baseline-r9)); the golden set lives in
+Shared test data lives in `testdata/` (see [Baseline snapshot](#baseline-snapshot-r9-p1)); the golden set lives in
 `../samples/` (see [Golden set](#golden-set-x1)); the palette is `../palettes/pantone.json`.
 
 ## Requirements
@@ -48,8 +48,8 @@ npm test                                             # tsc --noEmit, then vitest
 | Suite | Where | What it proves |
 |---|---|---|
 | core unit tests | `crates/core/src/*` | validation, errors, compositing, matching, ties, palette rule, pick |
-| baseline | `crates/core/tests/baseline.rs` | `core` reproduces the recorded baseline pixel for pixel (R9) |
-| suggestions | `crates/core/tests/suggestions.rs` | Pantone suggestions match the 2023 JavaScript (5,096 colors) |
+| baseline | `crates/core/tests/baseline.rs` | `core` matches the baseline snapshot pixel for pixel |
+| suggestions | `crates/core/tests/suggestions.rs` | Pantone suggestions match the snapshot exactly (5,096 distinct colors) |
 | WASM | `crates/wasm/tests/node.rs` | the baseline inside WASM (native = WASM), malformed input → error values, lengths, factories, pick |
 | contract | `crates/wasm/ts-test/` | the generated `.d.ts` (camelCase, `Outcome` narrowing, typed arrays) and runtime behavior from TypeScript |
 | io | `crates/io/tests/io.rs` | lossless PNG round trip, 16-bit/grayscale, ICC and EXIF warnings, typed errors, all samples decode |
@@ -137,49 +137,38 @@ git diff --stat ../samples                        # review the changed images, t
 
 `palettes generate` keeps existing configs; `--force` regenerates them and overwrites hand edits.
 
-## Baseline (R9)
+## Baseline snapshot (R9, P1)
 
-The restructuring kept the existing output exactly. The reference was recorded from the existing
-crate **after the dependency upgrade** (R12), not from the 2023 code itself.
+`testdata/baseline/` holds the **current approved behavior** of `core` on generated inputs. Tests only
+read it; after an intentional change, regenerate it and review the diff:
+
+```sh
+cargo run -p rekolor-core --example update_baseline                          # rewrite what changed
+cargo run -p rekolor-core --example update_baseline -- --colors-from-current # same, keeping the suggestion colors
+git diff --stat testdata/baseline                                            # review, then commit
+```
+
+The command reports which files changed ("baseline unchanged" otherwise). Recolor PNGs are rewritten
+only when their decoded pixels differ.
 
 | Path | What |
 |---|---|
-| `testdata/generator.rs` | Deterministic test buffers and mapping sets, plain Rust with no dependencies, included as a module wherever needed. Fixtures: `alpha_ramp` (every alpha 0–255 on 8 colors), `edges` (alpha- and color-anti-aliased edges on a transparent background), `picks` (exact pick colors and their ±1 neighbors), `gradient` (many unique colors), `noise` (random RGBA), `transparent` (fully transparent pixels with hidden RGB). Mapping sets: `none`, `one`, `calendar3`, `screenshot8`, `swapped4`. |
-| `testdata/baseline/recolor/<fixture>__<mapping set>.png` | Output of `replace_rgb_colors` for every fixture × mapping set, stored exactly as returned (PNG). Compare **decoded pixels**, never bytes (X2). |
-| `testdata/baseline/image-info.tsv` | Output of `image_info` for every fixture. |
-| `testdata/baseline/pantone-suggestions.tsv` | The 2023 JavaScript Pantone suggestion (`typescript/src/palette.ts`, with `color-diff`) for 5,096 colors (a 16-level grid plus 1,000 pseudo-random colors), with its ΔE. Reference for the Rust suggestion (R10), compared with a near-tie tolerance. |
+| `testdata/generator.rs` | Deterministic inputs, plain Rust with no dependencies, included as a module wherever needed. Fixtures: `alpha_ramp` (every alpha 0–255 on 8 colors), `edges` (alpha- and color-anti-aliased edges on a transparent background), `picks` (exact pick colors and their ±1 neighbors), `gradient` (many unique colors), `noise` (random RGBA), `transparent` (fully transparent pixels with hidden RGB). Mapping sets: `none`, `one`, `calendar3`, `screenshot8`, `swapped4`. Suggestion colors: a 16-level grid plus 1,000 distinct off-grid colors (5,096 distinct). |
+| `testdata/baseline/recolor/<fixture>__<mapping set>.png` | `recolor` for every fixture × mapping set. Compared as **decoded pixels** (X2). |
+| `testdata/baseline/image-info.tsv` | `analyze` for every fixture. |
+| `testdata/baseline/pantone-suggestions.tsv` | `Palette::suggest` for the suggestion colors, with ΔE. Compared exactly. |
 
-### How it was recorded
+### History
 
-The baseline was recorded at commit `c0d094c` ("Record the baseline"), which contains the existing
-crate's sources and the recorder (`rust/src/`, `rust/examples/record_baseline.rs`).
-The recorder included the existing modules (`src/conv.rs`, `info.rs`, `utils.rs`, `console.rs`)
-unchanged, the same way `src/main.rs` did. It encoded each fixture as a lossless PNG (checked by
-decoding it again), then passed it to `image_info` and `replace_rgb_colors`.
-
-The existing crate has since been removed; `crates/core` reproduces it (tests in
-`crates/core/tests/baseline.rs` and `suggestions.rs`). The baseline is not re-recorded from the new
-code: it is the fixed reference. If the inputs in `testdata/generator.rs` ever have to change,
-re-record from that commit:
-
-```sh
-git worktree add ../rekolor-baseline c0d094c     # the existing crate + recorder
-# copy the new testdata/generator.rs into it, then, inside ../rekolor-baseline/rust:
-cargo run --release --example record_baseline     # recolor outputs + image-info.tsv
-```
-
-The JavaScript suggestions don't depend on the removed crate:
-
-```sh
-node testdata/record_pantone_suggestions.cjs      # pantone-suggestions.tsv (needs `npm ci` in typescript/)
-```
-
-### Verified when recorded (2026-10-07)
-
-- Re-running both recorders produces byte-identical files.
-- The existing crate's WASM build (`wasm-pack --target nodejs`), run in Node on the same fixture
-  PNGs and mapping sets, returns byte-identical outputs for all 30 cases and identical
-  `image_info` for all 6 fixtures.
+- The baseline was first recorded from the existing crate after the dependency upgrade (R12), at commit
+  `c0d094c` ("Record the baseline"), which contains the old sources and the recorder
+  (`rust/src/`, `rust/examples/record_baseline.rs`). `crates/core` reproduced those 30 recolor outputs
+  and the image info exactly, natively and in WASM.
+- Until behavior step 1, `pantone-suggestions.tsv` held the **2023 JavaScript** suggestions
+  (`typescript/src/palette.ts` with `color-diff`, recorded by `testdata/record_pantone_suggestions.cjs`).
+  The Rust suggestions matched all 5,096 by name; ΔE differed by at most 0.005 (f32 vs f64). That
+  file is in git history; the snapshot now holds the Rust suggestions, for a new color set (the old one
+  repeated after 256 of its 1,000 pseudo-random colors).
 
 ## Behavior
 

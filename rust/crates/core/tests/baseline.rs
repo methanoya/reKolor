@@ -1,6 +1,7 @@
-//! R9: `core` must reproduce the recorded baseline (the existing crate after the R12 upgrade)
-//! pixel for pixel. Inputs come from `testdata/generator.rs`, expected outputs from
-//! `testdata/baseline/` (see `rust/README.md`).
+//! `core` must match the baseline snapshot in `testdata/baseline/` pixel for pixel (P1: current
+//! approved behavior; first recorded from the 2023 crate at commit `c0d094c`). Inputs come from
+//! `testdata/generator.rs`. After an intentional change: `cargo run -p rekolor-core --example
+//! update_baseline`, review the diff, commit.
 
 #[path = "../../../testdata/generator.rs"]
 mod generator;

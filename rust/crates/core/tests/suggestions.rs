@@ -1,15 +1,16 @@
-//! R10: the Rust Pantone suggestion must match the 2023 JavaScript one (`palette.ts` with
-//! `color-diff`, recorded in `testdata/baseline/pantone-suggestions.tsv`), except at near-ties:
-//! the two use different CIEDE2000 implementations, so when two entries are almost equally
-//! close, they may pick different ones.
+//! The Pantone suggestion must match the snapshot in `testdata/baseline/pantone-suggestions.tsv`
+//! exactly (P1: the baseline is current approved behavior; update it with
+//! `cargo run -p rekolor-core --example update_baseline` and review the diff).
+//!
+//! History: until behavior step 1 this file held the 2023 JavaScript suggestions (`color-diff`,
+//! commit `c0d094c`); the Rust suggestions matched all 5,096 of them by name.
+
+#[path = "../../../testdata/generator.rs"]
+mod generator;
 
 use std::path::Path;
 
-use rekolor_core::{Palette, PaletteEntry, Rgb8, delta_e_2000};
-
-/// When Rust and JS suggest different entries, both must be this close to equally near
-/// (measured with the Rust ΔE).
-const NEAR_TIE_TOLERANCE: f32 = 0.01;
+use rekolor_core::{Palette, PaletteEntry, Rgb8};
 
 fn repo_root() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../.."))
@@ -36,51 +37,55 @@ fn pantone() -> Palette {
     Palette::new(entries).unwrap()
 }
 
+fn snapshot() -> Vec<([u8; 3], String, String)> {
+    std::fs::read_to_string(repo_root().join("rust/testdata/baseline/pantone-suggestions.tsv"))
+        .unwrap()
+        .lines()
+        .filter(|l| !l.starts_with('#'))
+        .map(|line| {
+            let cols: Vec<&str> = line.split('\t').collect();
+            let c: Vec<u8> = cols[..3].iter().map(|v| v.parse().unwrap()).collect();
+            ([c[0], c[1], c[2]], cols[3].to_string(), cols[4].to_string())
+        })
+        .collect()
+}
+
 #[test]
-fn suggestions_match_2023_javascript_except_near_ties() {
+fn snapshot_covers_the_generated_colors() {
+    let colors: Vec<[u8; 3]> = snapshot().into_iter().map(|(c, _, _)| c).collect();
+    let expected = generator::suggestion_colors();
+    assert_eq!(expected.len(), 5096);
+    let distinct: std::collections::HashSet<_> = expected.iter().collect();
+    assert_eq!(
+        distinct.len(),
+        expected.len(),
+        "suggestion colors must be distinct"
+    );
+    assert_eq!(
+        colors, expected,
+        "snapshot colors differ from generator::suggestion_colors()"
+    );
+}
+
+#[test]
+fn suggestions_match_the_snapshot() {
     let palette = pantone();
     assert_eq!(palette.entries().len(), 909);
-    let tsv =
-        std::fs::read_to_string(repo_root().join("rust/testdata/baseline/pantone-suggestions.tsv"))
-            .unwrap();
-
-    let (mut total, mut near_ties, mut failures) = (0, Vec::new(), Vec::new());
-    for line in tsv.lines().filter(|l| !l.starts_with('#')) {
-        let cols: Vec<&str> = line.split('\t').collect();
-        let color = Rgb8::new(
-            cols[0].parse().unwrap(),
-            cols[1].parse().unwrap(),
-            cols[2].parse().unwrap(),
-        );
-        let js_name = cols[3];
-        total += 1;
-
-        let rust = palette.suggest(color);
-        if rust.entry.name == js_name {
-            continue;
-        }
-        let js_entry = palette
-            .entries()
-            .iter()
-            .find(|e| e.name == js_name)
-            .unwrap_or_else(|| panic!("JS suggested unknown entry {js_name}"));
-        let gap = (delta_e_2000(color, js_entry.rgb) - rust.delta_e).abs();
-        let report = format!(
-            "{color:?}: JS {js_name}, Rust {} (ΔE gap {gap:.4})",
-            rust.entry.name
-        );
-        if gap <= NEAR_TIE_TOLERANCE {
-            near_ties.push(report);
-        } else {
-            failures.push(report);
+    let mut failures = Vec::new();
+    for ([r, g, b], name, delta_e) in snapshot() {
+        let m = palette.suggest(Rgb8::new(r, g, b));
+        let actual = (m.entry.name.as_str(), format!("{:.6}", m.delta_e));
+        if actual != (name.as_str(), delta_e.clone()) {
+            failures.push(format!(
+                "[{r}, {g}, {b}]: snapshot {name} ({delta_e}), now {} ({})",
+                actual.0, actual.1
+            ));
         }
     }
-    assert_eq!(total, 5096);
-    eprintln!(
-        "{} of {total} suggestions identical; {} near-ties: {:?}",
-        total - near_ties.len() - failures.len(),
-        near_ties.len(),
-        near_ties
+    assert!(
+        failures.is_empty(),
+        "{} of 5096 suggestions differ:\n{}",
+        failures.len(),
+        failures.join("\n")
     );
-    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }
