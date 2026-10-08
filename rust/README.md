@@ -182,5 +182,9 @@ local) kept those; changes so far:
   5,096 colors this changed 6 suggestions, all near-black or near-white. Golden configs keep their
   stored inks, so the goldens didn't change.
 
+- **I8 (contract, no change):** with no mappings, `recolor` returns the composited copy (the image as
+  it looks on white); with one mapping, every pixel takes that ink. Tested in `core`, WASM and the TS
+  contract.
+
 Each change updates the baseline snapshot (and, if pixels move, the goldens) in the same commit, so its
 effect is a reviewed diff.

@@ -56,6 +56,11 @@ impl SourceImage {
 
     /// Recolors the image into `out`, which must be `width × height × 4` bytes. To write
     /// straight into an `ImageData`, pass `new Uint8Array(imageData.data.buffer)`.
+    ///
+    /// Each pixel is composited over white and takes the nearest ink (an exact source match takes
+    /// its own ink; ties go to the earlier mapping); the output is opaque. With **no mappings** the
+    /// output is the composited copy (the image as it looks on white); with **one mapping** every
+    /// pixel takes that ink.
     pub fn recolor(&self, request: Ts<RecolorRequest>, out: &mut [u8]) -> RecolorOutcome {
         let outcome = request
             .to_rust()

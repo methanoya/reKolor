@@ -381,3 +381,26 @@ fn numbers_must_be_whole_finite_and_in_u32_range() {
     let m: PaletteMatches = ok(read(palette.nearest(black(), 1.0)));
     assert_eq!(m.matches.len(), 1);
 }
+
+#[wasm_bindgen_test]
+fn zero_and_one_mapping_follow_the_contract() {
+    // I8: no mappings → the composited copy; one mapping → every pixel takes that ink.
+    let image = SourceImage::from_rgba(vec![230, 76, 60, 255, 9, 9, 9, 0], 2, 1).unwrap();
+    let mut out = [0u8; 8];
+
+    let none = Ts::from_rust(&RecolorRequest { mappings: vec![] }).unwrap();
+    let stats: RecolorStats = ok(read(image.recolor(none, &mut out)));
+    assert_eq!(out, [230, 76, 60, 255, 255, 255, 255, 255]);
+    assert_eq!((stats.exact, stats.nearest), (0.0, 2.0));
+
+    let one = Ts::from_rust(&RecolorRequest {
+        mappings: vec![Mapping {
+            source: rgb([230, 76, 60]),
+            ink: rgb([40, 120, 200]),
+        }],
+    })
+    .unwrap();
+    let stats: RecolorStats = ok(read(image.recolor(one, &mut out)));
+    assert_eq!(out, [40, 120, 200, 255, 40, 120, 200, 255]);
+    assert_eq!((stats.exact, stats.nearest), (1.0, 1.0));
+}

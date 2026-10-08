@@ -20,11 +20,12 @@ pub struct RecolorStats {
 
 /// Recolors `image` into `out`, which must have the same length as the source buffer.
 ///
-/// Existing behavior, unchanged (R9):
+/// Contract (behavior decisions I1, I2, I8, I9: all kept from the existing implementation):
 /// 1. each pixel is composited over white ([`composite_over_white`]); the output is opaque;
 /// 2. if the result equals a mapping's `source`, it takes that mapping's ink (first match wins);
 /// 3. otherwise it takes the **ink** nearest to it by CIEDE2000 (on a tie, the earlier mapping);
-/// 4. with no mappings, the composited pixel is passed through.
+/// 4. **no mappings**: the output is the composited copy (the image as it looks on white);
+/// 5. **one mapping**: no special case, so every pixel takes that ink.
 pub fn recolor(
     image: ImageRef<'_>,
     mappings: &[Mapping],
@@ -191,6 +192,20 @@ mod tests {
         assert_eq!(stats.exact, 1);
         let reversed = [mappings[1], mappings[0]];
         assert_eq!(run(&[230, 76, 60, 255], &reversed).0, [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn one_mapping_turns_every_pixel_into_its_ink() {
+        let mappings = [Mapping {
+            source: RED,
+            ink: BLUE,
+        }];
+        let rgba = [
+            230, 76, 60, 255, 1, 2, 3, 255, 9, 9, 9, 0, 250, 250, 250, 128,
+        ];
+        let (out, stats) = run(&rgba, &mappings);
+        assert_eq!(out, [40, 120, 200, 255].repeat(4));
+        assert_eq!((stats.exact, stats.nearest), (1, 3));
     }
 
     #[test]

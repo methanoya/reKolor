@@ -97,6 +97,18 @@ describe('SourceImage', () => {
     expect([...data]).toEqual([58, 117, 196, 255, 58, 117, 196, 255]);
   });
 
+  test('zero mappings give the composited copy; one mapping turns everything into its ink', () => {
+    // I8 contract. Pixel 2 is fully transparent, so it composites to white.
+    const image = redAndTransparent();
+    const out = new Uint8Array(8);
+
+    expect(unwrap(image.recolor({ mappings: [] }, out))).toEqual({ exact: 0, nearest: 2 });
+    expect([...out]).toEqual([230, 76, 60, 255, 255, 255, 255, 255]);
+
+    expect(unwrap(image.recolor(redToBlue, out))).toEqual({ exact: 1, nearest: 1 });
+    expect([...out]).toEqual([58, 117, 196, 255, 58, 117, 196, 255]);
+  });
+
   test('errors are values, and the module keeps working after them', () => {
     const image = redAndTransparent();
     const short = image.recolor(redToBlue, new Uint8Array(4));
