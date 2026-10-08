@@ -74,3 +74,38 @@ export function imagePixel(
 export function pixelCenter(view: View, x: number, y: number): { px: number; py: number } {
   return { px: (x + 0.5 - view.x) * view.scale, py: (y + 0.5 - view.y) * view.scale };
 }
+
+/** The source pixel under a CSS position, clamped to the image (dragging a pick past an edge). */
+export function clampedPixel(
+  view: View,
+  px: number,
+  py: number,
+  image: Size,
+): { x: number; y: number } {
+  const clamp = (v: number, size: number) => Math.min(size - 1, Math.max(0, Math.floor(v)));
+  return {
+    x: clamp(view.x + px / view.scale, image.width),
+    y: clamp(view.y + py / view.scale, image.height),
+  };
+}
+
+/** The marker nearest to a CSS position within `radius` CSS pixels of its center, if any. */
+export function markerAt<M extends { x: number; y: number }>(
+  view: View,
+  markers: readonly M[],
+  px: number,
+  py: number,
+  radius: number,
+): M | undefined {
+  let found: M | undefined;
+  let best = radius;
+  for (const m of markers) {
+    const c = pixelCenter(view, m.x, m.y);
+    const d = Math.hypot(c.px - px, c.py - py);
+    if (d <= best) {
+      found = m;
+      best = d;
+    }
+  }
+  return found;
+}

@@ -1,6 +1,7 @@
 import { playwright } from '@vitest/browser-playwright';
 import { defineConfig, mergeConfig } from 'vitest/config';
 import viteConfig from './vite.config.ts';
+import { mouseCommands } from './tests/browser/mouse.commands.ts';
 
 export default defineConfig((env) =>
   mergeConfig(viteConfig(env), {
@@ -20,6 +21,7 @@ export default defineConfig((env) =>
               enabled: true,
               headless: true,
               provider: playwright(),
+              commands: mouseCommands,
               // WA3 a: all three Playwright engines (WebKit is not branded Safari).
               instances: [{ browser: 'chromium' }, { browser: 'firefox' }, { browser: 'webkit' }],
             },

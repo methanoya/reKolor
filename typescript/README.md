@@ -50,10 +50,18 @@ main thread (Svelte)                      worker (src/lib/worker.ts)
 - **Picking:** a click maps through the zoom/pan transform to a source pixel; Rust reads the stored
   pixel, composites it over white and suggests the nearest ink (R10). At 100 % and above the color
   on screen is sent too, and Rust warns if it differs from the stored pixel.
+- **Moving a pick:** hold Shift and drag its circle (`src/lib/moves.ts`). The pick follows the
+  pointer pixel by pixel, re-picked as if clicked there, with the nearest ink for each new color;
+  within the same color a hand-chosen ink is kept. Pixels whose color another pick already has are
+  skipped, so a drop there leaves the pick on the last free pixel it passed. Escape, or the browser
+  taking the pointer away, cancels: the pick and its ink go back to how they were before the drag.
+  Away from a circle, Shift changes nothing (drag pans, click picks). Picks imported from a config
+  have no circle. Moving needs a mouse or pen and a keyboard; there is no touch or keyboard-only way.
+  Circles are drawn on their own canvas, so the color read for the warning above is never a circle.
 - **Live recolor:** at most one recolor runs and one waits (the newest picks); every result carries
   the image generation and pick revision, and only the current one is shown or downloaded. A failed
   open keeps the previous image (its generation changes only when an open succeeds).
-- **Pick-list changes** (pick, ink change, remove, clear, import) run one at a time in the order they
+- **Pick-list changes** (pick, move, ink change, remove, clear, import) run one at a time in the order they
   were made. At most 256 picks (the palette-config limit).
 - **Download** encodes the current result at full resolution (PNG, in the worker); if the image or
   picks change while it encodes, nothing is saved.

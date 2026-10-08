@@ -1,5 +1,15 @@
 import { describe, expect, test } from 'vitest';
-import { centered, fit, imagePixel, pan, pixelCenter, resize, zoomAt } from './view';
+import {
+  centered,
+  clampedPixel,
+  fit,
+  imagePixel,
+  markerAt,
+  pan,
+  pixelCenter,
+  resize,
+  zoomAt,
+} from './view';
 
 const image = { width: 400, height: 200 };
 const viewport = { width: 200, height: 200 };
@@ -56,5 +66,26 @@ describe('view', () => {
     const center = imagePixel(view, 100, 100, image);
     const wider = resize(view, viewport, { width: 600, height: 300 });
     expect(imagePixel(wider, 300, 150, image)).toEqual(center);
+  });
+
+  test('a dragged pick stays on the image past its edges', () => {
+    const view = fit(image, viewport); // 0.5: rows above and below the image
+    expect(clampedPixel(view, -50, 10, image)).toEqual({ x: 0, y: 0 });
+    expect(clampedPixel(view, 500, 500, image)).toEqual({ x: 399, y: 199 });
+    const p = pixelCenter(view, 123, 45);
+    expect(clampedPixel(view, p.px, p.py, image)).toEqual({ x: 123, y: 45 });
+  });
+
+  test('a marker is grabbed within the radius, the nearest one first', () => {
+    const view = centered(image, viewport, 4);
+    const markers = [
+      { id: 1, x: 200, y: 100 },
+      { id: 2, x: 202, y: 100 },
+    ];
+    const a = pixelCenter(view, 200, 100);
+    expect(markerAt(view, markers, a.px, a.py, 10)?.id).toBe(1);
+    expect(markerAt(view, markers, a.px + 6, a.py, 10)?.id).toBe(2); // 8 px from 2's center
+    expect(markerAt(view, markers, a.px - 11, a.py, 10)).toBeUndefined();
+    expect(markerAt(view, [], a.px, a.py, 10)).toBeUndefined();
   });
 });

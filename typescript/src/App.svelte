@@ -6,9 +6,10 @@
   import { EngineClient } from './lib/client';
   import { ALTERNATIVES } from './lib/engine';
   import { Latest } from './lib/latest';
+  import { Mover, type Marker } from './lib/moves';
   import { LIMITS } from './lib/limits';
   import type { AppOutcome } from './lib/outcome';
-  import { mappings, sameRgb, type PickEntry } from './lib/picks';
+  import { mappings, sameRgb, type PickEntry, type PickMove } from './lib/picks';
   import { Serial } from './lib/serial';
   import { fit, resize, zoomAt, type Size, type View } from './lib/view';
 
@@ -58,6 +59,8 @@
   let nextPickId = 1;
   /** Pick-list changes run one at a time, in the order of the user's actions (review fix). */
   const mutations = new Serial();
+  /** The pick being Shift-dragged: its marker follows the pointer until the move settles. */
+  let moving = $state<Marker>();
 
   let view = $state<View>({ scale: 1, x: 0, y: 0 });
   let viewport: Size = { width: 0, height: 0 };
@@ -76,6 +79,7 @@
     colors = undefined;
     file = undefined;
     picks = [];
+    mover.reset();
     resultRevision = -1;
   }
 
@@ -109,6 +113,7 @@
     file = { name: f.name, size: f.size };
     colors = undefined;
     picks = [];
+    mover.reset();
     view = fit(image, viewport);
     status = 'Click a color in the original to pick it.';
     requestRecolor();
@@ -154,6 +159,72 @@
       status = `Picked (${pixel.r}, ${pixel.g}, ${pixel.b}) → ${suggestion.name}`;
       requestRecolor();
     });
+  }
+
+  // ── Moving a pick (Shift-drag on its marker) ───────────────────────────────────────────────────
+  // Live: each new pixel re-picks the color and re-suggests the ink, like a click there, and the
+  // preview follows; within the same color the ink is kept (C1 a). A pixel whose color another pick
+  // already has is skipped; on release the pick stays at its last valid pixel (F2 a). Escape or a
+  // lost pointer cancels: the pick is put back as it was (F1 a). Ordering and coalescing: `Mover`.
+
+  const mover = new Mover<PickEntry>({
+    queue: (task) => mutations.run(task),
+    apply: applyMove,
+    save: (id) => {
+      const pick = picks.find((p) => p.id === id);
+      return pick && $state.snapshot(pick);
+    },
+    restore: (saved) => {
+      status = 'Move cancelled.';
+      if (!saved || !picks.some((p) => p.id === saved.id)) return;
+      picks = picks.map((p) => (p.id === saved.id ? saved : p));
+      requestRecolor();
+    },
+    show: (marker) => (moving = marker),
+  });
+
+  /** Re-picks a moved pick at its new pixel (runs inside `mutations`). */
+  async function applyMove(move: PickMove) {
+    const gen = generation;
+    const before = picks.find((p) => p.id === move.id);
+    if (!before) return;
+    const picked = await client.call((api) => api.pick(gen, move.x, move.y, move.seen));
+    if (gen !== generation) return;
+    if (picked.status === 'error') {
+      if (picked.error.kind !== 'superseded') error = picked.error.message;
+      return;
+    }
+    const { pixel, matching, suggestion, mismatch } = picked.value;
+    if (picks.some((p) => p.id !== move.id && sameRgb(p.matching, matching))) {
+      if (move.done) {
+        status = `That color (${pixel.r}, ${pixel.g}, ${pixel.b}) is already picked; the pick stayed where it was.`;
+      }
+      return;
+    }
+    // The same color (a flat area): keep the ink, which may have been chosen by hand.
+    const recolored = !sameRgb(before.matching, matching);
+    let { ink, alternatives } = before;
+    if (recolored) {
+      const nearest = await client.call((api) => api.nearest(matching, ALTERNATIVES));
+      if (gen !== generation) return;
+      ink = suggestion;
+      alternatives = nearest.status === 'ok' ? nearest.value : [suggestion];
+    }
+    picks = picks.map((p) =>
+      p.id === move.id
+        ? {
+            id: p.id,
+            pixel,
+            matching,
+            ink,
+            alternatives,
+            at: { x: move.x, y: move.y },
+            ...(mismatch ? { mismatch } : {}),
+          }
+        : p,
+    );
+    if (move.done) status = `Moved to (${pixel.r}, ${pixel.g}, ${pixel.b}) → ${ink.name}`;
+    if (recolored) requestRecolor();
   }
 
   /** Queues a synchronous pick-list change behind any pending one. */
@@ -462,16 +533,20 @@
 
   <section class="views">
     <ImageView
-      label="Original — click to pick a color"
+      label="Original — click to pick a color, Shift-drag a circle to move it"
       bitmap={original}
       {view}
-      markers={picks.flatMap((p) => (p.at ? [p.at] : []))}
+      markers={picks.flatMap((p) =>
+        moving?.id === p.id ? [moving] : p.at ? [{ id: p.id, ...p.at }] : [],
+      )}
       placeholder={opening
         ? 'Opening…'
         : 'Open, drop or paste an image (PNG, JPEG, WebP, GIF, AVIF…)'}
       onview={(v) => (view = v)}
       onviewport={setViewport}
       onpick={pickAt}
+      onmove={(move) => mover.update(move)}
+      onmovecancel={(drag) => mover.cancel(drag)}
     />
     <ImageView
       label={!image

@@ -1,20 +1,34 @@
 <script lang="ts">
   // One canvas view (original or result). Draws the bitmap through the shared zoom/pan view; drag
-  // pans, the wheel zooms, a click (without dragging) picks the source pixel under the pointer.
+  // pans, the wheel zooms, a click (without dragging) picks the source pixel under the pointer, and
+  // a Shift-drag that starts on a marker moves that pick.
 
   import type { Rgba } from 'rekolor-wasm';
-  import { imagePixel, pan, pixelCenter, zoomAt, type Size, type View } from '../lib/view';
+  import type { PickMove } from '../lib/picks';
+  import {
+    clampedPixel,
+    imagePixel,
+    markerAt,
+    pan,
+    pixelCenter,
+    zoomAt,
+    type Size,
+    type View,
+  } from '../lib/view';
 
   interface Props {
     label: string;
     bitmap: ImageBitmap | undefined;
     view: View;
-    /** Source pixels to mark (picks made by clicking). */
-    markers?: { x: number; y: number }[];
+    /** Source pixels to mark (picks made by clicking), by pick id. */
+    markers?: { id: number; x: number; y: number }[];
     placeholder: string;
     onview: (view: View) => void;
     onviewport: (size: Size) => void;
     onpick?: (x: number, y: number, seen: Rgba | undefined) => void;
+    onmove?: (move: PickMove) => void;
+    /** Escape, or the pointer was taken away (`pointercancel`), during a pick move. */
+    onmovecancel?: (drag: number) => void;
   }
 
   let {
@@ -26,10 +40,17 @@
     onview,
     onviewport,
     onpick,
+    onmove,
+    onmovecancel,
   }: Props = $props();
+
+  /** How far from a marker's center (CSS pixels) a Shift-drag still grabs it. */
+  const GRAB_RADIUS = 10;
 
   let frame: HTMLDivElement;
   let canvas: HTMLCanvasElement;
+  /** The markers, drawn on their own canvas so the image canvas holds only image pixels. */
+  let overlay: HTMLCanvasElement;
   let size = $state<Size>({ width: 0, height: 0 });
   let dpr = $state(1);
 
@@ -44,7 +65,7 @@
     return () => observer.disconnect();
   });
 
-  // Redraw whenever the bitmap, view, markers or size change.
+  // Redraw whenever the bitmap, view or size change.
   $effect(() => {
     const context = canvas.getContext('2d');
     if (!context) return;
@@ -58,7 +79,16 @@
     // Crisp pixels when zoomed in (and exact colors for the mismatch check); smooth when reduced.
     context.imageSmoothingEnabled = view.scale < 1;
     context.drawImage(bitmap, 0, 0);
+  });
+
+  // The markers, on top: redrawn on their own while a pick is dragged.
+  $effect(() => {
+    const context = overlay.getContext('2d');
+    if (!context) return;
+    overlay.width = Math.max(1, Math.round(size.width * dpr));
+    overlay.height = Math.max(1, Math.round(size.height * dpr));
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (!bitmap) return;
     for (const m of markers) {
       const { px, py } = pixelCenter(view, m.x, m.y);
       context.beginPath();
@@ -91,15 +121,74 @@
 
   let drag: { id: number; px: number; py: number; view: View; moved: boolean } | undefined;
 
+  /** A pick being moved: its marker's id, the pointer that moves it, and the last pixel reported. */
+  let moving = $state<{
+    id: number;
+    drag: number;
+    pointerId: number;
+    x: number;
+    y: number;
+    moved: boolean;
+  }>();
+  let drags = 0;
+  /** Shift is held and the pointer is over a marker: it can be grabbed. */
+  let grabbable = $state(false);
+  let shift = false;
+  let pointer: { px: number; py: number } | undefined;
+
+  const grabTarget = (px: number, py: number) =>
+    onmove && bitmap ? markerAt(view, markers, px, py, GRAB_RADIUS) : undefined;
+
+  function updateGrabbable() {
+    grabbable = shift && !!pointer && !!grabTarget(pointer.px, pointer.py);
+  }
+
+  function onkey(e: KeyboardEvent) {
+    if (e.key === 'Escape' && e.type === 'keydown' && moving) {
+      e.preventDefault();
+      cancelMove();
+      return;
+    }
+    if (e.key !== 'Shift') return;
+    shift = e.type === 'keydown';
+    updateGrabbable();
+  }
+
   function onpointerdown(e: PointerEvent) {
-    if (!bitmap || e.button !== 0) return;
+    // One gesture at a time: a second pointer can't replace or join the one in progress (review fix).
+    if (moving || drag || !bitmap || e.button !== 0) return;
     canvas.setPointerCapture(e.pointerId);
-    drag = { id: e.pointerId, ...position(e), view, moved: false };
+    const { px, py } = position(e);
+    const grabbed = e.shiftKey ? grabTarget(px, py) : undefined;
+    if (grabbed) {
+      moving = {
+        id: grabbed.id,
+        drag: ++drags,
+        pointerId: e.pointerId,
+        x: grabbed.x,
+        y: grabbed.y,
+        moved: false,
+      };
+      return;
+    }
+    drag = { id: e.pointerId, px, py, view, moved: false };
   }
 
   function onpointermove(e: PointerEvent) {
+    // A move belongs to the pointer that started it; other pointers can't drive it (review fix).
+    if (moving && e.pointerId !== moving.pointerId) return;
+    pointer = position(e);
+    shift = e.shiftKey;
+    if (moving && bitmap) {
+      const { x, y } = clampedPixel(view, pointer.px, pointer.py, bitmap);
+      if (x === moving.x && y === moving.y) return;
+      moving = { ...moving, x, y, moved: true };
+      onmove?.({ drag: moving.drag, id: moving.id, x, y, seen: seenColor(x, y), done: false });
+      return;
+    }
+    if (!drag) updateGrabbable();
     if (!drag || e.pointerId !== drag.id) return;
-    const { px, py } = position(e);
+    const { px, py } = pointer;
     const dx = px - drag.px;
     const dy = py - drag.py;
     if (!drag.moved && Math.hypot(dx, dy) < 4) return;
@@ -107,7 +196,38 @@
     onview(pan(drag.view, dx, dy));
   }
 
+  /** Ends a pick move on release: the last pixel is final. */
+  function endMove() {
+    if (!moving) return;
+    const { drag: d, id, x, y, moved } = moving;
+    moving = undefined;
+    if (moved) onmove?.({ drag: d, id, x, y, seen: seenColor(x, y), done: true });
+  }
+
+  /** Cancels a pick move (F1 a): the app puts the pick back as it was. */
+  function cancelMove() {
+    if (!moving) return;
+    const { drag: d, pointerId } = moving;
+    moving = undefined;
+    if (canvas.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId);
+    onmovecancel?.(d);
+  }
+
+  /**
+   * The browser took the pointer away (`pointercancel`), or its capture was lost without a release:
+   * a move is cancelled (F1 a), a pan is dropped. After a release or a cancel nothing is active, so
+   * the `lostpointercapture` that follows them does nothing.
+   */
+  function endGesture(e: PointerEvent) {
+    if (moving?.pointerId === e.pointerId) cancelMove();
+    else if (drag?.id === e.pointerId) drag = undefined;
+  }
+
   function onpointerup(e: PointerEvent) {
+    if (moving) {
+      if (e.pointerId === moving.pointerId) endMove();
+      return;
+    }
     if (!drag || e.pointerId !== drag.id) return;
     const wasClick = !drag.moved;
     drag = undefined;
@@ -124,6 +244,8 @@
   function seenColor(x: number, y: number): Rgba | undefined {
     if (view.scale < 1) return undefined;
     const { px, py } = pixelCenter(view, x, y);
+    // A pick dragged past the edge can sit on a pixel scrolled out of sight.
+    if (px < 0 || py < 0 || px >= size.width || py >= size.height) return undefined;
     const data = canvas
       .getContext('2d')
       ?.getImageData(Math.floor(px * dpr), Math.floor(py * dpr), 1, 1).data;
@@ -133,18 +255,28 @@
   }
 </script>
 
+<svelte:window onkeydown={onkey} onkeyup={onkey} />
+
 <figure class="view">
   <figcaption>{label}</figcaption>
   <div class="frame" class:empty={!bitmap} bind:this={frame}>
     <canvas
       bind:this={canvas}
       class:pickable={!!onpick && !!bitmap}
+      class:grabbable
+      class:moving={!!moving}
       aria-label={label}
       {onpointerdown}
       {onpointermove}
       {onpointerup}
-      onpointercancel={() => (drag = undefined)}
+      onpointercancel={endGesture}
+      onlostpointercapture={endGesture}
+      onpointerleave={() => {
+        pointer = undefined;
+        grabbable = false;
+      }}
     ></canvas>
+    <canvas bind:this={overlay} class="overlay" aria-hidden="true"></canvas>
     {#if !bitmap}
       <p class="placeholder">{placeholder}</p>
     {/if}
@@ -189,6 +321,15 @@
   }
   canvas.pickable {
     cursor: crosshair;
+  }
+  canvas.grabbable {
+    cursor: grab;
+  }
+  canvas.moving {
+    cursor: grabbing;
+  }
+  .overlay {
+    pointer-events: none;
   }
   .empty canvas {
     cursor: default;

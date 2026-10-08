@@ -1,12 +1,13 @@
 // End-to-end smoke test (plan step 5): the real app in each engine — open → pick → live recolor →
 // download — plus a config import.
 
-import { page, userEvent } from 'vitest/browser';
+import { commands, page, userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import App from '../../src/App.svelte';
 import '../../src/app.css';
 import { fixtureFile } from './fixtures';
+import type {} from './mouse.commands';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -145,5 +146,273 @@ describe('reKolor app', () => {
     await expect
       .element(screen.getByTestId('status'))
       .toHaveTextContent('Imported 1 pick (size 1) from 1.palettes.toml.');
+  });
+
+  // ── Moving picks (`.agents/repositioning`) ──────────────────────────────────────────────────
+  // At 1:1 the canvas center is column 24 of the 48 × 32 test images, and each CSS pixel to the
+  // right is one column more. The row is read from the first pick (it differs by engine).
+
+  const ORIGINAL = 'canvas[aria-label^="Original"]';
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  /** 48 × 32, columns 0–23 one flat color and 24–47 another (for same-color moves). */
+  async function halvesFile(): Promise<File> {
+    const canvas = new OffscreenCanvas(48, 32);
+    const context = canvas.getContext('2d')!;
+    context.fillStyle = 'rgb(200 40 40)';
+    context.fillRect(0, 0, 24, 32);
+    context.fillStyle = 'rgb(40 40 200)';
+    context.fillRect(24, 0, 24, 32);
+    return new File([await canvas.convertToBlob({ type: 'image/png' })], 'halves.png');
+  }
+
+  /** Opens an image at 1:1 and picks at each offset (CSS px right of the canvas center). */
+  async function opened(file: File, offsets: number[]) {
+    const screen = await render(App);
+    await expect.element(screen.getByText(/Engine ready/)).toBeVisible();
+    const input = screen.container.querySelector<HTMLInputElement>('#file')!;
+    await userEvent.upload(page.elementLocator(input), file);
+    await expect
+      .element(screen.getByText('No picks yet: the image as printed on white'))
+      .toBeVisible();
+    await screen.getByRole('button', { name: '1:1' }).click();
+    const canvas = screen.container.querySelector<HTMLCanvasElement>(ORIGINAL)!;
+    const box = canvas.getBoundingClientRect();
+    const at = (dx: number) => ({ x: box.width / 2 + dx, y: box.height / 2 });
+    const items = screen.getByRole('list', { name: 'Picked colors' }).getByRole('listitem');
+    const click = async (dx: number) => {
+      const count = screen.container.querySelectorAll('.pick').length;
+      await userEvent.click(page.elementLocator(canvas), { position: at(dx) });
+      await expect.element(items).toHaveLength(count + 1);
+    };
+    for (const dx of offsets) await click(dx);
+
+    /** The picks' colors as shown in the list, in order. */
+    const colors = () =>
+      [...screen.container.querySelectorAll('.pick .color')].map((e) => e.textContent!.trim());
+    const selects = () => [...screen.container.querySelectorAll<HTMLSelectElement>('.pick select')];
+    /** A held mouse: press at, move to, release (Shift is held separately). */
+    const mouse = {
+      down: async (dx: number) => {
+        await commands.mouseTo(ORIGINAL, at(dx).x, at(dx).y);
+        await commands.mouseDown();
+      },
+      to: (dx: number) => commands.mouseTo(ORIGINAL, at(dx).x, at(dx).y),
+      up: () => commands.mouseUp(),
+    };
+    const shift = (held: boolean) => userEvent.keyboard(held ? '{Shift>}' : '{/Shift}');
+    /** The pointer id of the next press on the canvas. */
+    const nextPointerId = () =>
+      new Promise<number>((resolve) =>
+        canvas.addEventListener('pointerdown', (e) => resolve(e.pointerId), { once: true }),
+      );
+    /** A pointer event from the page's script, at an offset from the canvas center. */
+    const synthetic = (type: string, pointerId: number, dx: number) =>
+      canvas.dispatchEvent(
+        new PointerEvent(type, {
+          pointerId,
+          bubbles: true,
+          shiftKey: true,
+          clientX: box.left + at(dx).x,
+          clientY: box.top + at(dx).y,
+        }),
+      );
+    /**
+     * Lets the canvas capture pointers made by `synthetic`, as the browser does for a real second
+     * pointer (pen + touch); otherwise `setPointerCapture` throws for them before the app reacts.
+     */
+    const acceptSyntheticCapture = () => {
+      const real = canvas.setPointerCapture.bind(canvas);
+      vi.spyOn(canvas, 'setPointerCapture').mockImplementation((id) => {
+        try {
+          real(id);
+        } catch {
+          // a synthetic pointer: treated as captured
+        }
+      });
+    };
+    const status = screen.getByTestId('status');
+    return {
+      acceptSyntheticCapture,
+      screen,
+      canvas,
+      at,
+      click,
+      colors,
+      selects,
+      mouse,
+      shift,
+      nextPointerId,
+      synthetic,
+      status,
+    };
+  }
+
+  /** The row's green value from a list label "rgb r, g, b". */
+  const green = (label: string | undefined) => /^rgb \d+, (\d+),/.exec(label ?? '')?.[1];
+
+  test('D2: a held Shift-drag moves the pick live, before the release', async () => {
+    const { colors, mouse, shift, status } = await opened(await fixtureFile('opaque'), [0]);
+    const g = green(colors()[0]);
+    expect(colors()[0]).toMatch(/^rgb 130, /);
+    await shift(true);
+    await mouse.down(0);
+    await mouse.to(10);
+    await expect.poll(() => colors()[0]).toMatch(new RegExp(`^rgb 184, ${g}, `));
+    expect(status.element().textContent).not.toContain('Moved to'); // still held
+    await mouse.up();
+    await shift(false);
+    await expect.element(status).toMatchTextContent(`Moved to (184, ${g},`);
+  });
+
+  test('D1, C1 a: a hand-chosen ink stays within its color and is replaced by a new one', async () => {
+    const { screen, colors, selects, mouse, shift, status } = await opened(
+      await halvesFile(),
+      [-6],
+    );
+    expect(colors()).toEqual(['rgb 200, 40, 40']);
+    await userEvent.selectOptions(selects()[0]!, '3');
+    await expect.poll(() => selects()[0]!.selectedIndex).toBe(3);
+    const hand = selects()[0]!.selectedOptions[0]!.text;
+
+    await shift(true);
+    await mouse.down(-6);
+    await mouse.to(-3); // column 21: the same color
+    await mouse.up();
+    await expect.element(status).toMatchTextContent('Moved to (200, 40, 40)');
+    expect(selects()[0]!.selectedIndex).toBe(3); // C1 a: the hand choice is kept
+
+    await mouse.down(-3);
+    await mouse.to(6); // column 30: the other color
+    await mouse.up();
+    await shift(false);
+    await expect.element(status).toMatchTextContent('Moved to (40, 40, 200)');
+    expect(colors()).toEqual(['rgb 40, 40, 200']);
+    expect(selects()[0]!.selectedIndex).toBe(0); // D1: the nearest ink for the new color
+    expect(selects()[0]!.selectedOptions[0]!.text).not.toBe(hand);
+    await expect.element(screen.getByText('Printed with 1 ink')).toBeVisible();
+  });
+
+  test('D3, F2 a: a drop on a picked color leaves the pick on the last free pixel', async () => {
+    const { colors, mouse, shift, status } = await opened(await fixtureFile('opaque'), [0, 10]);
+    const [a, b] = colors();
+    const g = green(a);
+    expect(b).toMatch(/^rgb 184, /);
+    await shift(true);
+    await mouse.down(10);
+    await mouse.to(5); // column 29: free
+    await expect.poll(() => colors()[1]).toMatch(new RegExp(`^rgb 157, ${g}, `));
+    await mouse.to(0); // column 24: pick A's color
+    await mouse.up();
+    await shift(false);
+    await expect.element(status).toMatchTextContent('already picked');
+    expect(colors()[0]).toBe(a);
+    expect(colors()[1]).toMatch(new RegExp(`^rgb 157, ${g}, `));
+  });
+
+  test('D4: away from the circles, a Shift-drag pans and a Shift-click picks', async () => {
+    const { colors, mouse, shift } = await opened(await fixtureFile('opaque'), [0]);
+    const before = colors();
+    await shift(true);
+    await mouse.down(20); // 20 CSS px from the circle: out of reach
+    await mouse.to(30); // pans the image 10 px right
+    await mouse.up();
+    expect(colors()).toEqual(before);
+    // A Shift-click 20 px from the moved circle: column 24 − 10 − 10 = 4 after the pan.
+    await mouse.down(-10);
+    await mouse.up();
+    await shift(false);
+    await expect.poll(() => colors()[1]).toMatch(/^rgb 21, /);
+  });
+
+  test('a move answers only to the pointer that started it', async () => {
+    const {
+      colors,
+      mouse,
+      shift,
+      status,
+      nextPointerId,
+      synthetic,
+      click,
+      acceptSyntheticCapture,
+    } = await opened(await fixtureFile('opaque'), [0]);
+    acceptSyntheticCapture();
+    const g = green(colors()[0]);
+    await shift(true);
+    const id = nextPointerId();
+    await mouse.down(0);
+    await mouse.to(5);
+    await expect.poll(() => colors()[0]).toMatch(/^rgb 157, /);
+    const other = (await id) + 100;
+    // A second pointer pressing (with Shift) on the moved circle and away from it, moving,
+    // releasing, being cancelled and losing capture: none of it replaces the move or pans.
+    synthetic('pointerdown', other, 5);
+    synthetic('pointerdown', other + 1, -15);
+    synthetic('pointermove', other, 15);
+    synthetic('pointermove', other + 1, -5);
+    for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+      synthetic(type, other, 15);
+      synthetic(type, other + 1, -5);
+    }
+    await wait(300);
+    expect(colors()[0]).toMatch(/^rgb 157, /);
+    expect(status.element().textContent).not.toContain('Moved to');
+    expect(status.element().textContent).not.toContain('cancelled');
+    await mouse.to(10);
+    await mouse.up();
+    await shift(false);
+    await expect.element(status).toMatchTextContent(`Moved to (184, ${g},`);
+    // Nothing was left behind: a click still picks, at the pixel it would without a pan.
+    await click(-10); // column 14
+    expect(colors()[1]).toMatch(/^rgb 75, /);
+  });
+
+  for (const how of ['Escape', 'pointercancel', 'lostpointercapture'] as const) {
+    test(`F1 a: ${how} puts the pick back as it was before the drag`, async () => {
+      const { colors, selects, mouse, shift, status, nextPointerId, synthetic } = await opened(
+        await fixtureFile('opaque'),
+        [0],
+      );
+      const before = colors();
+      await userEvent.selectOptions(selects()[0]!, '2');
+      await expect.poll(() => selects()[0]!.selectedIndex).toBe(2);
+      await shift(true);
+      const id = nextPointerId();
+      await mouse.down(0);
+      await mouse.to(10);
+      await expect.poll(() => colors()[0]).toMatch(/^rgb 184, /);
+      expect(selects()[0]!.selectedIndex).toBe(0);
+      if (how === 'Escape') await userEvent.keyboard('{Escape}');
+      else synthetic(how, await id, 10);
+      await expect.element(status).toHaveTextContent('Move cancelled.');
+      expect(colors()).toEqual(before);
+      expect(selects()[0]!.selectedIndex).toBe(2); // the hand-chosen ink is back too
+      await mouse.to(15);
+      await mouse.up();
+      await shift(false);
+      await wait(300);
+      expect(colors()).toEqual(before); // the rest of the gesture does nothing
+      await expect.element(status).toHaveTextContent('Move cancelled.');
+    });
+  }
+
+  test('a drag without Shift pans, leaves the picks alone and ignores other pointers', async () => {
+    const { colors, mouse, status, click, nextPointerId, synthetic, acceptSyntheticCapture } =
+      await opened(await fixtureFile('opaque'), [0]);
+    acceptSyntheticCapture();
+    const before = colors();
+    const id = nextPointerId();
+    await mouse.down(0);
+    const other = (await id) + 100;
+    synthetic('pointerdown', other, -15); // a second pointer can't start a pan of its own
+    synthetic('pointercancel', other, -15); // nor end this one
+    synthetic('lostpointercapture', other, -15);
+    await mouse.to(10); // pans the image 10 px right
+    await mouse.up();
+    await wait(300);
+    expect(colors()).toEqual(before);
+    expect(status.element().textContent).not.toContain('Moved to');
+    await click(-10); // column 24 − 10 − 10 = 4, so the pan happened
+    expect(colors()[1]).toMatch(/^rgb 21, /);
   });
 });

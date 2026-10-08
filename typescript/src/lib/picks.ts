@@ -26,3 +26,15 @@ export const sameRgb = (a: Rgb, b: Rgb) => a.r === b.r && a.g === b.g && a.b ===
 
 export const mappings = (picks: PickEntry[]): Mapping[] =>
   picks.map((p) => ({ source: p.matching, ink: p.ink.rgb }));
+
+/** A Shift-drag of a pick's marker to the source pixel (x, y); `done` on release. */
+export interface PickMove {
+  /** Increments per drag, so a finished drag's last update is not mixed with the next drag's. */
+  drag: number;
+  id: number;
+  x: number;
+  y: number;
+  /** The color shown there (for the mismatch warning), as for a click. */
+  seen: Rgba | undefined;
+  done: boolean;
+}
