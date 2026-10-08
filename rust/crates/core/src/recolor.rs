@@ -146,17 +146,51 @@ mod tests {
     }
 
     #[test]
-    fn ties_go_to_the_earlier_mapping() {
-        let ink = Rgb8::new(100, 100, 100);
-        let mappings = [
-            Mapping { source: RED, ink },
+    fn nearest_ink_ties_go_to_the_earlier_mapping() {
+        // Two different inks at exactly the same CIEDE2000 distance from gray (found by search;
+        // with another ΔE implementation (R11) this pair may no longer tie, see the precondition).
+        let pixel = Rgb8::new(128, 128, 128);
+        let a = Rgb8::new(100, 140, 117);
+        let b = Rgb8::new(101, 101, 135);
+        assert_eq!(
+            crate::delta_e_2000(pixel, a).to_bits(),
+            crate::delta_e_2000(pixel, b).to_bits(),
+            "precondition: an exact tie"
+        );
+        let first_a = [
+            Mapping {
+                source: RED,
+                ink: a,
+            },
             Mapping {
                 source: BLUE,
-                ink, // same ink, same distance
+                ink: b,
             },
         ];
-        let inks: Vec<(Mapping, LabValue)> = mappings.iter().map(|&m| (m, lab(m.ink))).collect();
-        assert_eq!(lookup(&inks, Rgb8::new(90, 90, 90)), (ink, false));
+        let first_b = [first_a[1], first_a[0]];
+        let rgba = [128, 128, 128, 255];
+        assert_eq!(run(&rgba, &first_a).0, [a.r, a.g, a.b, 255]);
+        assert_eq!(run(&rgba, &first_b).0, [b.r, b.g, b.b, 255]);
+    }
+
+    #[test]
+    fn exact_match_ties_go_to_the_earlier_mapping() {
+        // Two picks with the same source and different inks: the first one wins.
+        let mappings = [
+            Mapping {
+                source: RED,
+                ink: BLUE,
+            },
+            Mapping {
+                source: RED,
+                ink: Rgb8::new(0, 0, 0),
+            },
+        ];
+        let (out, stats) = run(&[230, 76, 60, 255], &mappings);
+        assert_eq!(out, [40, 120, 200, 255]);
+        assert_eq!(stats.exact, 1);
+        let reversed = [mappings[1], mappings[0]];
+        assert_eq!(run(&[230, 76, 60, 255], &reversed).0, [0, 0, 0, 255]);
     }
 
     #[test]

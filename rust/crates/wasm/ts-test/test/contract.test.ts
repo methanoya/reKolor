@@ -144,6 +144,30 @@ describe('SourceImage', () => {
     palette.free();
   });
 
+  test('numbers that are not whole, finite, non-negative 32-bit values are error values', () => {
+    // Review fix F1: wasm-bindgen would otherwise truncate/wrap them into valid-looking values.
+    const one = new Uint8Array([5, 6, 7, 255]);
+    for (const [w, h] of [[1.5, 1], [4294967297, 1], [NaN, 1], [Infinity, 1], [-1, 1], [1, 0.5]]) {
+      const created = SourceImage.create(one, w!, h!);
+      expect(created.status === 'error' && created.error.kind, `create(${w}, ${h})`).toBe('invalidInput');
+    }
+
+    const image = unwrap(SourceImage.create(one, 1, 1));
+    const palette = unwrap(Palette.create({ entries: [{ name: 'X', rgb: { r: 0, g: 0, b: 0 } }] }));
+    for (const [x, y] of [[NaN, 0], [Infinity, 0], [-0.9, 0], [4294967296, 0], [0.5, 0], [0, -1]]) {
+      const picked = image.pick(x!, y!, undefined, palette);
+      expect(picked.status === 'error' && picked.error.kind, `pick(${x}, ${y})`).toBe('invalidInput');
+    }
+    for (const k of [4294967296, 1.5, NaN, -1]) {
+      const nearest = palette.nearest({ r: 0, g: 0, b: 0 }, k);
+      expect(nearest.status === 'error' && nearest.error.kind, `nearest(k=${k})`).toBe('invalidInput');
+    }
+
+    // The same objects keep working.
+    expect(unwrap(image.pick(0, 0, undefined, palette)).pixel).toEqual({ r: 5, g: 6, b: 7, a: 255 });
+    expect(unwrap(palette.nearest({ r: 0, g: 0, b: 0 }, 1)).matches).toHaveLength(1);
+  });
+
   test('free() releases the object; later calls throw', () => {
     const image = redAndTransparent();
     image.free();

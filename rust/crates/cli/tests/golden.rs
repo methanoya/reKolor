@@ -97,17 +97,22 @@ fn every_sample_matches_its_reviewed_golden_outputs() {
                     continue;
                 }
             };
-            if (golden.width, golden.height) != (image.width, image.height) {
+            if (golden.width(), golden.height()) != (image.width(), image.height()) {
                 failures.push(format!(
                     "{label}: golden is {}×{}, image is {}×{}",
-                    golden.width, golden.height, image.width, image.height
+                    golden.width(),
+                    golden.height(),
+                    image.width(),
+                    image.height()
                 ));
                 continue;
             }
             let mappings = sized.mappings(&palette).unwrap();
-            let mut out = vec![0; image.rgba.len()];
+            let mut out = vec![0; image.rgba().len()];
             recolor(image.view(), &mappings, &mut out).unwrap();
-            if let Some(report) = compare(&label, image.width, image.height, &golden.rgba, &out) {
+            if let Some(report) =
+                compare(&label, image.width(), image.height(), golden.rgba(), &out)
+            {
                 failures.push(report);
             }
             checked += 1;

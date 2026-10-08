@@ -1302,6 +1302,7 @@ dependencies = [
  "image",
  "log",
  "rekolor-core",
+ "tempfile",
  "thiserror",
 ]
 

@@ -67,6 +67,19 @@ impl PaletteConfig {
         if sizes.windows(2).any(|w| w[0] == w[1]) {
             bail!("a palette size appears more than once");
         }
+        // Size N means up to N distinct inks; several picks may share one ink.
+        for palette in &config.palette {
+            let inks: std::collections::HashSet<&str> =
+                palette.picks.iter().map(|p| p.ink.as_str()).collect();
+            if inks.len() > palette.size as usize {
+                bail!(
+                    "the size-{} palette lists {} distinct inks (at most {} allowed)",
+                    palette.size,
+                    inks.len(),
+                    palette.size
+                );
+            }
+        }
         Ok(config)
     }
 
@@ -174,6 +187,25 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    fn sized(size: u32, inks: &[&str]) -> String {
+        let picks: String = inks
+            .iter()
+            .enumerate()
+            .map(|(i, ink)| format!("  {{ rgba = [{i}, 0, 0, 255], ink = {ink:?} }},\n"))
+            .collect();
+        format!("[[palette]]\nsize = {size}\npicks = [\n{picks}]\n")
+    }
+
+    #[test]
+    fn rejects_more_distinct_inks_than_the_size() {
+        // Review fix F4: size N means up to N distinct inks.
+        let err = PaletteConfig::parse(&sized(3, &["A", "B", "C", "D"])).unwrap_err();
+        assert!(format!("{err:#}").contains("4 distinct inks"), "{err:#}");
+        // Several picks may share an ink: 4 picks, 3 inks is fine.
+        assert!(PaletteConfig::parse(&sized(3, &["A", "B", "C", "A"])).is_ok());
+        assert!(PaletteConfig::parse(&sized(3, &["A", "B", "C"])).is_ok());
     }
 
     #[test]

@@ -2,7 +2,9 @@ use rekolor_core as core;
 use tsify::Ts;
 use wasm_bindgen::prelude::*;
 
-use crate::outcome::{PickOutcome, RecolorOutcome, error_object, ok_object, outcome_js, to_ts};
+use crate::outcome::{
+    PickOutcome, RecolorOutcome, error_object, ok_object, outcome_js, to_ts, whole_u32,
+};
 use crate::{ErrorInfo, ImageStats, Outcome, Palette, RecolorRequest, Rgba};
 
 #[wasm_bindgen]
@@ -25,8 +27,12 @@ pub struct SourceImage {
 #[wasm_bindgen]
 impl SourceImage {
     /// Copies an RGBA8 buffer (e.g. `imageData.data`) of `width × height × 4` bytes.
-    pub fn create(rgba: Vec<u8>, width: u32, height: u32) -> SourceImageOutcome {
-        match SourceImage::from_rgba(rgba, width, height) {
+    /// `width` and `height` must be whole numbers from 0 to 2^32 − 1.
+    pub fn create(rgba: Vec<u8>, width: f64, height: f64) -> SourceImageOutcome {
+        let created = whole_u32("width", width)
+            .and_then(|w| Ok((w, whole_u32("height", height)?)))
+            .and_then(|(w, h)| SourceImage::from_rgba(rgba, w, h));
+        match created {
             Ok(image) => ok_object(image.into()),
             Err(error) => error_object(&error),
         }
@@ -66,15 +72,17 @@ impl SourceImage {
         outcome_js(Outcome::from(outcome))
     }
 
-    /// Picks the pixel at image coordinates `(x, y)` and suggests a palette entry for it.
-    /// `seen` is the color the caller saw there (for debugging); a difference beyond the
+    /// Picks the pixel at image coordinates `(x, y)` (whole numbers) and suggests a palette entry
+    /// for it. `seen` is the color the caller saw there (for debugging); a difference beyond the
     /// tolerance comes back as `mismatch`, a warning only.
-    pub fn pick(&self, x: u32, y: u32, seen: Option<Ts<Rgba>>, palette: &Palette) -> PickOutcome {
-        let outcome = seen
-            .map(|s| s.to_rust())
-            .transpose()
-            .map_err(ErrorInfo::from)
-            .and_then(|seen| {
+    pub fn pick(&self, x: f64, y: f64, seen: Option<Ts<Rgba>>, palette: &Palette) -> PickOutcome {
+        let outcome = whole_u32("x", x)
+            .and_then(|x| Ok((x, whole_u32("y", y)?)))
+            .and_then(|(x, y)| {
+                let seen = seen
+                    .map(|s| s.to_rust())
+                    .transpose()
+                    .map_err(ErrorInfo::from)?;
                 let pick = core::pick(self.view(), x, y, seen.map(Into::into), palette.core())?;
                 Ok(crate::Pick::from(pick))
             });

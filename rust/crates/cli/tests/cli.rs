@@ -104,8 +104,8 @@ fn generate_configs_then_update_goldens() {
             rekolor_io::decode_file(&root.join(format!("{image}-out-{size}.png"))).unwrap();
         let source = rekolor_io::decode_file(&root.join(format!("{image}.png"))).unwrap();
         assert_eq!(
-            (decoded.width, decoded.height),
-            (source.width, source.height)
+            (decoded.width(), decoded.height()),
+            (source.width(), source.height())
         );
 
         let config = PaletteConfig::load(&root.join(format!("{image}.palettes.toml"))).unwrap();
@@ -117,7 +117,7 @@ fn generate_configs_then_update_goldens() {
             .iter()
             .map(|m| [m.ink.r, m.ink.g, m.ink.b])
             .collect();
-        for p in decoded.rgba.as_chunks::<4>().0 {
+        for p in decoded.rgba().as_chunks::<4>().0 {
             assert_eq!(p[3], 255);
             assert!(
                 inks.contains(&[p[0], p[1], p[2]]),
@@ -206,4 +206,114 @@ fn decoder_warnings_go_to_stderr() {
     assert!(output.status.success());
     // `edges` has an alpha-anti-aliased rim.
     assert!(String::from_utf8_lossy(&output.stderr).contains("semi-transparent pixels"));
+}
+
+#[test]
+fn oversized_configs_are_rejected_before_writing() {
+    // Review fix F4: a hand-edited size-3 palette with 4 distinct inks.
+    let tree = samples_tree();
+    let root = tree.path();
+    let palette = repo_palette();
+    let palette = palette.to_str().unwrap();
+    let config = "[[palette]]\nsize = 3\npicks = [\n\
+        { rgba = [255, 184, 0, 255], ink = \"Pantone 1235\" },\n\
+        { rgba = [44, 44, 57, 255], ink = \"Pantone 532\" },\n\
+        { rgba = [230, 76, 60, 255], ink = \"Pantone 179\" },\n\
+        { rgba = [255, 255, 255, 255], ink = \"Pure White (non-palette)\" },\n]\n";
+    std::fs::write(root.join("samples/edges.palettes.toml"), config).unwrap();
+
+    let failed = rekolor(
+        &[
+            "recolor",
+            "samples/edges.png",
+            "-o",
+            "out.png",
+            "--config",
+            "samples/edges.palettes.toml",
+            "--size",
+            "3",
+            "--palette",
+            palette,
+        ],
+        root,
+    );
+    assert!(!failed.status.success());
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("4 distinct inks"));
+    assert!(!root.join("out.png").exists());
+
+    let failed = rekolor(&["golden", "update", "samples", "--palette", palette], root);
+    assert!(!failed.status.success());
+    assert!(!root.join("samples/edges-out-3.png").exists());
+}
+
+#[test]
+fn zero_sized_images_fail_cleanly() {
+    // Review fix F2: no panic (exit code 101), an ordinary error instead.
+    let dir = tempfile::tempdir().unwrap();
+    let mut bytes = b"farbfeld".to_vec();
+    bytes.extend_from_slice(&0u32.to_be_bytes());
+    bytes.extend_from_slice(&1u32.to_be_bytes());
+    std::fs::write(dir.path().join("zero.ff"), bytes).unwrap();
+    let output = rekolor(&["analyze", "zero.ff"], dir.path());
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("error:") && !stderr.contains("panicked"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn tga_inputs_work_end_to_end() {
+    // Review fix F3: TGA is found by discovery and decoded by extension.
+    let tree = samples_tree();
+    let root = tree.path();
+    let red_tga: &[u8] = &[
+        0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 24, 32, 0, 0, 255,
+    ];
+    std::fs::write(root.join("samples/red.tga"), red_tga).unwrap();
+
+    let stdout = ok(rekolor(&["analyze", "samples/red.tga"], root));
+    assert!(stdout.contains("1×1"), "{stdout}");
+
+    let palette = repo_palette();
+    let stdout = ok(rekolor(
+        &[
+            "palettes",
+            "generate",
+            "samples",
+            "--palette",
+            palette.to_str().unwrap(),
+        ],
+        root,
+    ));
+    assert!(stdout.contains("red.palettes.toml"), "{stdout}");
+}
+
+#[test]
+fn golden_update_writes_nothing_if_any_config_is_invalid() {
+    // Follow-up to review fix F4: the bad config belongs to the image that sorts LAST, so a
+    // validate-as-you-go update would already have rewritten the first image's outputs.
+    let tree = samples_tree();
+    let root = tree.path();
+    let palette = repo_palette();
+    let palette = palette.to_str().unwrap();
+    ok(rekolor(
+        &["palettes", "generate", "samples", "--palette", palette],
+        root,
+    ));
+    let bad = "[[palette]]\nsize = 1\npicks = [\n\
+        { rgba = [255, 184, 0, 255], ink = \"Pantone 1235\" },\n\
+        { rgba = [44, 44, 57, 255], ink = \"Pantone 532\" },\n]\n";
+    std::fs::write(root.join("samples/sub/gradient.palettes.toml"), bad).unwrap();
+
+    let failed = rekolor(&["golden", "update", "samples", "--palette", palette], root);
+    assert!(!failed.status.success());
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("gradient.palettes.toml"));
+    for size in [3, 7, 16] {
+        assert!(
+            !root.join(format!("samples/edges-out-{size}.png")).exists(),
+            "edges-out-{size}.png was written although a later config is invalid"
+        );
+    }
 }

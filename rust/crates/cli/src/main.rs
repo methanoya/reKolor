@@ -173,19 +173,48 @@ fn run(cli: Cli) -> Result<()> {
         }
         Command::Golden(GoldenCommand::Update { dir }) => {
             let palette = palette_file::load(&palette_path()?)?;
+            // Pass 1: check every config (sizes, ink names) and every image before writing
+            // anything, so a bad file anywhere in the tree leaves all outputs untouched.
+            let mut jobs: Vec<GoldenJob> = Vec::new();
+            let mut problems: Vec<String> = Vec::new();
             for input in discover::images(&dir)? {
                 let config_path = config::config_path(&input);
                 if !config_path.exists() {
                     eprintln!("{}: no config, skipped", input.display());
                     continue;
                 }
-                let config = PaletteConfig::load(&config_path)?;
+                let checked = PaletteConfig::load(&config_path).and_then(|config| {
+                    config
+                        .palette
+                        .iter()
+                        .map(|sized| Ok((sized.size, sized.mappings(&palette)?)))
+                        .collect::<Result<Vec<_>>>()
+                        .with_context(|| format!("{}", config_path.display()))
+                });
+                let decodable = rekolor_io::decode_file(&input)
+                    .map(|_| ())
+                    .with_context(|| format!("{}", input.display()));
+                match (checked, decodable) {
+                    (Ok(sizes), Ok(())) => jobs.push(GoldenJob { input, sizes }),
+                    (checked, decodable) => problems.extend(
+                        [checked.err(), decodable.err()]
+                            .into_iter()
+                            .flatten()
+                            .map(|e| format!("{e:#}")),
+                    ),
+                }
+            }
+            if !problems.is_empty() {
+                bail!(
+                    "nothing written; fix these first:\n  {}",
+                    problems.join("\n  ")
+                );
+            }
+            // Pass 2: render and write.
+            for GoldenJob { input, sizes } in jobs {
                 let image = decode(&input)?;
-                for sized in &config.palette {
-                    let mappings = sized
-                        .mappings(&palette)
-                        .with_context(|| format!("{}", config_path.display()))?;
-                    let output = config::output_path(&input, sized.size);
+                for (size, mappings) in sizes {
+                    let output = config::output_path(&input, size);
                     recolor_to_file(&image, &mappings, &output)?;
                     println!("{}", output.display());
                 }
@@ -195,10 +224,16 @@ fn run(cli: Cli) -> Result<()> {
     }
 }
 
+/// One image of a `golden update`, checked in pass 1: its outputs per palette size.
+struct GoldenJob {
+    input: PathBuf,
+    sizes: Vec<(u32, Vec<Mapping>)>,
+}
+
 /// Decodes an image and prints its decoder warnings (M1) to stderr.
 fn decode(path: &Path) -> Result<DecodedImage> {
     let image = rekolor_io::decode_file(path)?;
-    for warning in &image.warnings {
+    for warning in image.warnings() {
         eprintln!("warning: {}: {warning}", path.display());
     }
     Ok(image)
@@ -209,9 +244,9 @@ fn recolor_to_file(
     mappings: &[Mapping],
     output: &Path,
 ) -> Result<rekolor_core::RecolorStats> {
-    let mut out = vec![0; image.rgba.len()];
+    let mut out = vec![0; image.rgba().len()];
     let stats = recolor(image.view(), mappings, &mut out)?;
-    rekolor_io::write_png(output, &out, image.width, image.height)?;
+    rekolor_io::write_png(output, &out, image.width(), image.height())?;
     Ok(stats)
 }
 

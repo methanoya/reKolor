@@ -9,7 +9,7 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 use image::metadata::Orientation;
-use image::{DynamicImage, ImageDecoder, ImageEncoder, ImageReader};
+use image::{DynamicImage, ImageDecoder, ImageEncoder, ImageFormat, ImageReader};
 use rekolor_core::ImageRef;
 
 #[derive(Debug, thiserror::Error)]
@@ -31,18 +31,49 @@ pub enum Error {
 }
 
 /// A decoded image: RGBA8 pixels (straight alpha, row-major) plus the M1 warnings.
+///
+/// Only [`decode`] and [`decode_file`] create one, so its dimensions always match its buffer and
+/// [`DecodedImage::view`] can't fail. The fields are private for that reason:
+///
+/// ```compile_fail
+/// let image = rekolor_io::DecodedImage { width: 0, height: 1, rgba: vec![], warnings: vec![] };
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodedImage {
-    pub width: u32,
-    pub height: u32,
-    pub rgba: Vec<u8>,
-    pub warnings: Vec<DecodeWarning>,
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+    warnings: Vec<DecodeWarning>,
 }
 
 impl DecodedImage {
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// The pixels: `width × height × 4` bytes, RGBA8, row-major, straight alpha.
+    pub fn rgba(&self) -> &[u8] {
+        &self.rgba
+    }
+
+    /// Takes the pixel buffer out.
+    pub fn into_rgba(self) -> Vec<u8> {
+        self.rgba
+    }
+
+    /// Things this decoder may treat differently from a browser (M1).
+    pub fn warnings(&self) -> &[DecodeWarning] {
+        &self.warnings
+    }
+
+    /// The pixels as a validated core image.
     pub fn view(&self) -> ImageRef<'_> {
         ImageRef::new(&self.rgba, self.width, self.height)
-            .expect("decoded buffers always match their dimensions")
+            .expect("only decode() creates a DecodedImage, and it validates the dimensions")
     }
 }
 
@@ -78,23 +109,32 @@ impl fmt::Display for DecodeWarning {
     }
 }
 
-/// Reads and decodes an image file.
+/// Reads and decodes an image file. The format is detected from the content; when that fails
+/// (TGA has no magic bytes), the file extension decides.
 pub fn decode_file(path: &Path) -> Result<DecodedImage, Error> {
     let bytes = std::fs::read(path).map_err(|source| Error::Io {
         path: path.to_owned(),
         source,
     })?;
-    decode(&bytes)
+    decode_with_hint(&bytes, ImageFormat::from_path(path).ok())
 }
 
 /// Decodes an image in any readable format to RGBA8: 16-bit and grayscale images are converted,
-/// and the EXIF orientation is applied (R3).
+/// and the EXIF orientation is applied (R3). The format is detected from the content only; formats
+/// without a signature (TGA) need [`decode_file`].
 pub fn decode(bytes: &[u8]) -> Result<DecodedImage, Error> {
-    let reader = ImageReader::new(Cursor::new(bytes))
+    decode_with_hint(bytes, None)
+}
+
+fn decode_with_hint(bytes: &[u8], hint: Option<ImageFormat>) -> Result<DecodedImage, Error> {
+    let mut reader = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .expect("reading from memory can't fail");
     if reader.format().is_none() {
-        return Err(Error::UnknownFormat);
+        match hint {
+            Some(format) => reader.set_format(format),
+            None => return Err(Error::UnknownFormat),
+        }
     }
     let mut decoder = reader.into_decoder().map_err(Error::Decode)?;
     let icc = decoder.icc_profile().map_err(Error::Decode)?;
@@ -104,6 +144,8 @@ pub fn decode(bytes: &[u8]) -> Result<DecodedImage, Error> {
     let rgba = image.to_rgba8();
     let (width, height) = rgba.dimensions();
     let rgba = rgba.into_raw();
+    // Some decoders accept 0×N images; the core's invariants don't (review fix F2).
+    ImageRef::new(&rgba, width, height)?;
 
     let mut warnings = Vec::new();
     if let Some(profile) = icc.filter(|p| !p.is_empty()) {

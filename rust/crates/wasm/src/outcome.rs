@@ -92,6 +92,23 @@ pub(crate) fn outcome_js<T: Tsify + Serialize, O: JsCast>(outcome: Outcome<T>) -
     to_ts(&outcome).js_value().unchecked_into()
 }
 
+/// Converts a JS number to `u32`, rejecting anything that isn't a whole, finite number from 0 to
+/// `u32::MAX`. wasm-bindgen's own `u32` parameters would silently truncate fractions, wrap large
+/// values and turn NaN/Infinity into 0 (review fix F1).
+pub(crate) fn whole_u32(name: &str, value: f64) -> Result<u32, ErrorInfo> {
+    if value.is_finite() && value.fract() == 0.0 && (0.0..=f64::from(u32::MAX)).contains(&value) {
+        Ok(value as u32)
+    } else {
+        Err(ErrorInfo {
+            kind: ErrorKind::InvalidInput,
+            message: format!(
+                "{name} must be a whole number from 0 to {}, got {value}",
+                u32::MAX
+            ),
+        })
+    }
+}
+
 /// Converts a Rust value to its TypeScript form. Only called with plain data structs, which
 /// always serialize; a failure would be a bug, not an input error.
 pub(crate) fn to_ts<T: Tsify + Serialize>(value: &T) -> Ts<T> {

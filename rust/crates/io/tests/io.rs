@@ -55,10 +55,10 @@ fn png_round_trip_is_lossless_for_every_fixture() {
         let png = encode_png(&fixture.rgba, fixture.width, fixture.height).unwrap();
         let decoded = decode(&png).unwrap();
         assert_eq!(
-            (decoded.width, decoded.height),
+            (decoded.width(), decoded.height()),
             (fixture.width, fixture.height)
         );
-        assert_eq!(decoded.rgba, fixture.rgba, "{}", fixture.name);
+        assert_eq!(decoded.rgba(), fixture.rgba, "{}", fixture.name);
 
         // The only possible warning for a plain PNG: semi-transparent pixels, counted exactly.
         let expected = fixture
@@ -73,7 +73,7 @@ fn png_round_trip_is_lossless_for_every_fixture() {
         } else {
             vec![]
         };
-        assert_eq!(decoded.warnings, expected_warnings, "{}", fixture.name);
+        assert_eq!(decoded.warnings(), expected_warnings, "{}", fixture.name);
     }
 }
 
@@ -97,7 +97,7 @@ fn sixteen_bit_and_grayscale_are_converted_to_rgba8() {
         .unwrap();
     let decoded = decode(&png).unwrap();
     assert_eq!(
-        decoded.rgba,
+        decoded.rgba(),
         [0, 0, 0, 255, 128, 128, 128, 255, 255, 255, 255, 255]
     );
 
@@ -108,9 +108,9 @@ fn sixteen_bit_and_grayscale_are_converted_to_rgba8() {
         .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
         .unwrap();
     let decoded = decode(&png).unwrap();
-    assert_eq!(decoded.rgba, [200, 200, 200, 100]);
+    assert_eq!(decoded.rgba(), [200, 200, 200, 100]);
     assert_eq!(
-        decoded.warnings,
+        decoded.warnings(),
         [DecodeWarning::SemiTransparentPixels { count: 1 }]
     );
 }
@@ -120,8 +120,11 @@ fn icc_profile_is_reported() {
     let profile = vec![7u8; 128]; // contents aren't interpreted
     let png = png_with(&A, 1, 1, Some(profile), None);
     let decoded = decode(&png).unwrap();
-    assert_eq!(decoded.rgba, A);
-    assert_eq!(decoded.warnings, [DecodeWarning::IccProfile { bytes: 128 }]);
+    assert_eq!(decoded.rgba(), A);
+    assert_eq!(
+        decoded.warnings(),
+        [DecodeWarning::IccProfile { bytes: 128 }]
+    );
 }
 
 #[test]
@@ -130,18 +133,18 @@ fn exif_orientation_is_applied_and_reported_png() {
     let rgba = [A, B].concat();
     let png = png_with(&rgba, 2, 1, None, Some(exif_orientation(6)));
     let decoded = decode(&png).unwrap();
-    assert_eq!((decoded.width, decoded.height), (1, 2));
-    assert_eq!(decoded.rgba, [A, B].concat());
+    assert_eq!((decoded.width(), decoded.height()), (1, 2));
+    assert_eq!(decoded.rgba(), [A, B].concat());
     assert_eq!(
-        decoded.warnings,
+        decoded.warnings(),
         [DecodeWarning::OrientationApplied { exif_value: 6 }]
     );
 
     // Orientation 3 (rotate 180°) keeps the size and reverses the row.
     let png = png_with(&rgba, 2, 1, None, Some(exif_orientation(3)));
     let decoded = decode(&png).unwrap();
-    assert_eq!((decoded.width, decoded.height), (2, 1));
-    assert_eq!(decoded.rgba, [B, A].concat());
+    assert_eq!((decoded.width(), decoded.height()), (2, 1));
+    assert_eq!(decoded.rgba(), [B, A].concat());
 }
 
 #[test]
@@ -155,9 +158,9 @@ fn exif_orientation_is_applied_and_reported_jpeg() {
         .write_image(&rgb, 16, 8, ExtendedColorType::Rgb8)
         .unwrap();
     let decoded = decode(&jpeg).unwrap();
-    assert_eq!((decoded.width, decoded.height), (8, 16));
+    assert_eq!((decoded.width(), decoded.height()), (8, 16));
     assert_eq!(
-        decoded.warnings,
+        decoded.warnings(),
         [DecodeWarning::OrientationApplied { exif_value: 8 }]
     );
 }
@@ -177,6 +180,51 @@ fn decode_errors_are_typed() {
     }
 }
 
+/// A Farbfeld file with the given dimensions and no pixel data.
+fn empty_farbfeld(width: u32, height: u32) -> Vec<u8> {
+    let mut bytes = b"farbfeld".to_vec();
+    bytes.extend_from_slice(&width.to_be_bytes());
+    bytes.extend_from_slice(&height.to_be_bytes());
+    bytes
+}
+
+/// A valid uncompressed 1×1 TGA with one red pixel (TGA stores BGR).
+const RED_TGA: &[u8] = &[
+    0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, // header: no ID, no color map, uncompressed true-color
+    1, 0, 1, 0, 24, 32, // 1×1, 24 bits per pixel, top-left origin
+    0, 0, 255, // blue, green, red
+];
+
+#[test]
+fn zero_dimensions_are_a_typed_error_not_a_panic() {
+    // The Farbfeld decoder accepts 0×N images; `decode` must reject them (review fix F2).
+    for (width, height) in [(0, 1), (1, 0), (0, 0)] {
+        match decode(&empty_farbfeld(width, height)) {
+            Err(Error::InvalidImage(rekolor_core::Error::EmptyImage { .. })) => {}
+            other => panic!("{width}×{height}: expected EmptyImage, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn tga_files_are_recognized_by_extension() {
+    // TGA has no magic bytes, so content detection can't find it (review fix F3).
+    assert!(matches!(decode(RED_TGA), Err(Error::UnknownFormat)));
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("red.tga");
+    std::fs::write(&path, RED_TGA).unwrap();
+    let decoded = decode_file(&path).unwrap();
+    assert_eq!((decoded.width(), decoded.height()), (1, 1));
+    assert_eq!(decoded.rgba(), [255, 0, 0, 255]);
+
+    // A file that is neither detectable nor has a known extension stays an unknown format.
+    let unknown = dir.path().join("red.bin");
+    std::fs::write(&unknown, RED_TGA).unwrap();
+    assert!(matches!(decode_file(&unknown), Err(Error::UnknownFormat)));
+}
+
 #[test]
 fn every_sample_image_decodes() {
     let samples = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../samples"));
@@ -186,13 +234,13 @@ fn every_sample_image_decodes() {
     assert!(files.len() >= 19, "found {} sample images", files.len());
     for path in &files {
         let decoded = decode_file(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-        assert!(decoded.width > 0 && decoded.height > 0);
-        let warnings: Vec<String> = decoded.warnings.iter().map(|w| w.to_string()).collect();
+        assert!(decoded.width() > 0 && decoded.height() > 0);
+        let warnings: Vec<String> = decoded.warnings().iter().map(|w| w.to_string()).collect();
         eprintln!(
             "{} {}×{} {:?}",
             path.strip_prefix(&samples).unwrap().display(),
-            decoded.width,
-            decoded.height,
+            decoded.width(),
+            decoded.height(),
             warnings
         );
     }

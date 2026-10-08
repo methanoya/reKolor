@@ -11,3 +11,6 @@ image.workspace = true
 log = "0.4.34"
 rekolor-core = { path = "../core" }
 thiserror = "2.0.21"
+
+[dev-dependencies]
+tempfile = "3.27.0"

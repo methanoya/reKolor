@@ -209,11 +209,11 @@ fn buffer_lengths_and_dimensions_are_checked() {
 
 #[wasm_bindgen_test]
 fn create_factories_return_outcome_objects() {
-    let ok_image = JsValue::from(SourceImage::create(vec![1, 2, 3, 4], 1, 1));
+    let ok_image = JsValue::from(SourceImage::create(vec![1, 2, 3, 4], 1.0, 1.0));
     assert_eq!(property(&ok_image, "status"), "ok");
     assert!(property(&ok_image, "value").is_object());
 
-    let bad_image = JsValue::from(SourceImage::create(vec![1, 2, 3], 1, 1));
+    let bad_image = JsValue::from(SourceImage::create(vec![1, 2, 3], 1.0, 1.0));
     assert_eq!(property(&bad_image, "status"), "error");
     assert_eq!(
         property(&property(&bad_image, "error"), "kind"),
@@ -242,7 +242,7 @@ fn pick_reads_the_source_pixel_and_warns_on_mismatch() {
     // Two pixels: transparent, then opaque red.
     let image = SourceImage::from_rgba(vec![0, 0, 0, 0, 230, 76, 60, 255], 2, 1).unwrap();
 
-    let p: Pick = ok(read(image.pick(1, 0, None, &palette)));
+    let p: Pick = ok(read(image.pick(1.0, 0.0, None, &palette)));
     assert_eq!(
         p.pixel,
         Rgba {
@@ -258,7 +258,7 @@ fn pick_reads_the_source_pixel_and_warns_on_mismatch() {
     assert_eq!(p.mismatch, None);
 
     // Transparent is matched as white.
-    let p: Pick = ok(read(image.pick(0, 0, None, &palette)));
+    let p: Pick = ok(read(image.pick(0.0, 0.0, None, &palette)));
     assert_eq!(p.matching, rgb([255, 255, 255]));
     assert!(p.suggestion.non_palette);
 
@@ -270,7 +270,7 @@ fn pick_reads_the_source_pixel_and_warns_on_mismatch() {
         a: 255,
     })
     .unwrap();
-    let p: Pick = ok(read(image.pick(1, 0, Some(seen), &palette)));
+    let p: Pick = ok(read(image.pick(1.0, 0.0, Some(seen), &palette)));
     let mismatch = p.mismatch.expect("mismatch warning");
     assert_eq!(mismatch.max_channel_difference, 100);
     assert_eq!(
@@ -291,14 +291,14 @@ fn pick_reads_the_source_pixel_and_warns_on_mismatch() {
         a: 255,
     })
     .unwrap();
-    let p: Pick = ok(read(image.pick(1, 0, Some(close), &palette)));
+    let p: Pick = ok(read(image.pick(1.0, 0.0, Some(close), &palette)));
     assert_eq!(p.mismatch, None);
 
-    let outcome: Outcome<Pick> = read(image.pick(2, 0, None, &palette));
+    let outcome: Outcome<Pick> = read(image.pick(2.0, 0.0, None, &palette));
     assert_eq!(error_kind(outcome), ErrorKind::OutOfBounds);
 
     let bad_seen = Ts::new_unchecked(JsValue::from_str("red"));
-    let outcome: Outcome<Pick> = read(image.pick(1, 0, Some(bad_seen), &palette));
+    let outcome: Outcome<Pick> = read(image.pick(1.0, 0.0, Some(bad_seen), &palette));
     assert_eq!(error_kind(outcome), ErrorKind::InvalidInput);
 }
 
@@ -310,7 +310,7 @@ fn palette_suggest_and_nearest() {
     let m: PaletteMatch = ok(read(palette.suggest(red.clone())));
     assert_eq!((m.index, m.name.as_str()), (1, "Pantone 179"));
 
-    let all: PaletteMatches = ok(read(palette.nearest(red, 2)));
+    let all: PaletteMatches = ok(read(palette.nearest(red, 2.0)));
     assert_eq!(all.matches.len(), 2);
     assert_eq!(all.matches[0].index, 1);
     assert!(all.matches[0].delta_e <= all.matches[1].delta_e);
@@ -318,4 +318,66 @@ fn palette_suggest_and_nearest() {
     let outcome: Outcome<PaletteMatch> =
         read(palette.suggest(Ts::new_unchecked(JsValue::UNDEFINED)));
     assert_eq!(error_kind(outcome), ErrorKind::InvalidInput);
+}
+
+#[wasm_bindgen_test]
+fn numbers_must_be_whole_finite_and_in_u32_range() {
+    // Review fix F1: these would otherwise be truncated or wrapped into valid-looking values.
+    let one = || vec![5, 6, 7, 255];
+    for (w, h) in [
+        (1.5, 1.0),
+        (4294967297.0, 1.0),
+        (f64::NAN, 1.0),
+        (f64::INFINITY, 1.0),
+        (-1.0, 1.0),
+        (1.0, 0.5),
+    ] {
+        let created = JsValue::from(SourceImage::create(one(), w, h));
+        assert_eq!(property(&created, "status"), "error", "create({w}, {h})");
+        assert_eq!(
+            property(&property(&created, "error"), "kind"),
+            "invalidInput"
+        );
+    }
+
+    let image = SourceImage::from_rgba(one(), 1, 1).unwrap();
+    let palette = small_palette();
+    for (x, y) in [
+        (f64::NAN, 0.0),
+        (f64::INFINITY, 0.0),
+        (-0.9, 0.0),
+        (4294967296.0, 0.0),
+        (0.5, 0.0),
+        (0.0, -1.0),
+    ] {
+        let outcome: Outcome<Pick> = read(image.pick(x, y, None, &palette));
+        assert_eq!(
+            error_kind(outcome),
+            ErrorKind::InvalidInput,
+            "pick({x}, {y})"
+        );
+    }
+    let black = || Ts::from_rust(&rgb([0, 0, 0])).unwrap();
+    for k in [4294967296.0, 1.5, f64::NAN, -1.0] {
+        let outcome: Outcome<PaletteMatches> = read(palette.nearest(black(), k));
+        assert_eq!(
+            error_kind(outcome),
+            ErrorKind::InvalidInput,
+            "nearest(k={k})"
+        );
+    }
+
+    // Valid calls on the same objects still work; -0 counts as 0.
+    let p: Pick = ok(read(image.pick(-0.0, 0.0, None, &palette)));
+    assert_eq!(
+        p.pixel,
+        Rgba {
+            r: 5,
+            g: 6,
+            b: 7,
+            a: 255
+        }
+    );
+    let m: PaletteMatches = ok(read(palette.nearest(black(), 1.0)));
+    assert_eq!(m.matches.len(), 1);
 }

@@ -2,7 +2,9 @@ use rekolor_core as core;
 use tsify::Ts;
 use wasm_bindgen::prelude::*;
 
-use crate::outcome::{NearestOutcome, SuggestOutcome, error_object, ok_object, outcome_js};
+use crate::outcome::{
+    NearestOutcome, SuggestOutcome, error_object, ok_object, outcome_js, whole_u32,
+};
 use crate::{ErrorInfo, Outcome, PaletteData, PaletteMatch, PaletteMatches, Rgb};
 
 #[wasm_bindgen]
@@ -51,19 +53,20 @@ impl Palette {
         outcome_js(Outcome::from(outcome))
     }
 
-    /// Up to `k` entries ordered by distance; ties go to the earlier entry.
-    pub fn nearest(&self, color: Ts<Rgb>, k: u32) -> NearestOutcome {
-        let outcome = color
-            .to_rust()
-            .map_err(ErrorInfo::from)
-            .map(|c| PaletteMatches {
+    /// Up to `k` entries ordered by distance; ties go to the earlier entry. `k` must be a whole
+    /// number from 0 to 2^32 − 1.
+    pub fn nearest(&self, color: Ts<Rgb>, k: f64) -> NearestOutcome {
+        let outcome = whole_u32("k", k).and_then(|k| {
+            let c = color.to_rust().map_err(ErrorInfo::from)?;
+            Ok(PaletteMatches {
                 matches: self
                     .inner
                     .nearest(c.into(), k as usize)
                     .into_iter()
                     .map(Into::into)
                     .collect(),
-            });
+            })
+        });
         outcome_js(Outcome::from(outcome))
     }
 }
