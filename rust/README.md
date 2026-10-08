@@ -1,7 +1,7 @@
 # reKolor, Rust part
 
 A self-contained Cargo workspace (R1, R2): the color engine, its browser interface, native file
-I/O and a command-line tool. It builds and tests on its own; the web app (`../web/`) consumes only
+I/O and a command-line tool. It builds and tests on its own; the web app (`../typescript/`) consumes only
 the WASM package it produces.
 
 | Crate | What it is | Must not depend on |

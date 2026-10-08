@@ -12,7 +12,7 @@ The WASM package (`../rust/crates/wasm/pkg`) is generated and not committed, and
 depends on it as a local package, so build it **before** `npm ci`:
 
 ```sh
-cd web
+cd typescript
 npm run wasm        # wasm-pack build ../rust/crates/wasm --release --target web
 npm ci
 npm run dev         # http://localhost:5173

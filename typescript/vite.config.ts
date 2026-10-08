@@ -14,7 +14,7 @@ export default defineConfig(({ mode }) => ({
   server: {
     fs: {
       // The palette (`../palettes/pantone.json`) and the WASM package (`../rust/crates/wasm/pkg`,
-      // linked into node_modules) live outside `web/`; the browser tests also read the decoder
+      // linked into node_modules) live outside `typescript/`; the browser tests also read the decoder
       // fixtures and sample images.
       allow: [
         searchForWorkspaceRoot(process.cwd()),

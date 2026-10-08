@@ -1,6 +1,6 @@
 //! Writes the cross-decoder fixtures (M2) to `rust/testdata/decoders/`: encoded images with known
 //! content, and how `rekolor-io` decodes them (the reference the browser decoder is compared
-//! with in `web/tests/browser/decoders.test.ts`).
+//! with in `typescript/tests/browser/decoders.test.ts`).
 //!
 //!     cargo run --release -p rekolor-io --example update_decoder_fixtures
 //!

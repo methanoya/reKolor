@@ -1,6 +1,6 @@
 //! The cross-decoder fixtures (M2) in `testdata/decoders/` must match a fresh `rekolor-io` decode:
 //! pixels, size and warnings. The browser side compares its own decoding with the same references
-//! (`web/tests/browser/decoders.test.ts`). Regenerate with
+//! (`typescript/tests/browser/decoders.test.ts`). Regenerate with
 //! `cargo run --release -p rekolor-io --example update_decoder_fixtures`.
 
 use std::path::Path;

@@ -15,8 +15,7 @@ It uses Typescript, Rust, WebAssembly, Svelte
 | Folder | What |
 |---|---|
 | `rust/` | The color engine as a Cargo workspace: pure core, WASM interface, file I/O, palette configs and the `rekolor` CLI. See [rust/README.md](rust/README.md). |
-| `web/` | The web app (Svelte 5, TypeScript, Vite), running the WASM engine in a Web Worker. See [web/README.md](web/README.md). |
+| `typescript/` | The web app (Svelte 5, TypeScript, Vite), running the WASM engine in a Web Worker. See [typescript/README.md](typescript/README.md). |
 | `palettes/` | The Pantone palette (`pantone.json`). |
 | `samples/` | The golden set: sample images, their palette configs and the reviewed outputs. |
-| `typescript/` | The 2023 app (Svelte 3, Rollup); replaced by `web/` and kept until the two are compared. |
 
