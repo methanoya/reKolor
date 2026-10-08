@@ -415,4 +415,62 @@ describe('reKolor app', () => {
     await click(-10); // column 24 − 10 − 10 = 4, so the pan happened
     expect(colors()[1]).toMatch(/^rgb 21, /);
   });
+
+  // ── The colorized ink dropdown (`.agents/colorized-drobox`) ─────────────────────────────────────
+
+  /** Customizable select, as `PickList`'s `@supports` gate decides (Chromium, WebKit; not Firefox). */
+  const customized =
+    CSS.supports('appearance', 'base-select') && CSS.supports('selector(::picker(select))');
+
+  const visible = (e: Element | null) => {
+    const box = e?.getBoundingClientRect();
+    return !!box && box.width > 0 && box.height > 0;
+  };
+
+  test("each ink option carries its ink's color", async () => {
+    const { screen, selects } = await opened(await fixtureFile('opaque'), [0]);
+    const select = selects()[0]!;
+    const swatches = [...select.options].map((o) => o.querySelector<HTMLElement>('.option-swatch'));
+    expect(swatches).toHaveLength(8);
+    for (const swatch of swatches) expect(swatch?.style.background).toMatch(/^rgb\(/);
+    // The chosen option's swatch is the ink swatch shown in the pick row.
+    const ink = screen.container.querySelector<HTMLElement>('.pick .swatch.ink')!;
+    expect(swatches[select.selectedIndex]!.style.background).toBe(ink.style.background);
+    // Choosing an option makes its swatch's color (read before choosing) the ink.
+    const third = swatches[3]!.style.background;
+    expect(third).not.toBe(ink.style.background);
+    await userEvent.selectOptions(select, '3');
+    await expect.poll(() => ink.style.background).toBe(third);
+  });
+
+  test.runIf(customized)('customized select: the swatches are shown, closed and open', async () => {
+    const { screen, selects } = await opened(await fixtureFile('opaque'), [0]);
+    const select = selects()[0]!;
+    expect(getComputedStyle(select).appearance).toBe('base-select');
+    const ink = screen.container.querySelector<HTMLElement>('.pick .swatch.ink')!;
+    const closed = select.querySelector('selectedcontent .option-swatch');
+    expect(visible(closed)).toBe(true);
+    expect(getComputedStyle(closed!).backgroundColor).toBe(getComputedStyle(ink).backgroundColor);
+    const swatches = [...select.options].map((o) => o.querySelector('.option-swatch'));
+    expect(swatches.some(visible)).toBe(false); // closed: the list is not shown
+    await userEvent.click(select);
+    await expect.poll(() => swatches.every(visible)).toBe(true);
+    await userEvent.keyboard('{Escape}');
+    await expect.poll(() => swatches.some(visible)).toBe(false);
+  });
+
+  test.runIf(!customized)(
+    'native select fallback: full ink names, and it still chooses',
+    async () => {
+      const { screen, selects } = await opened(await fixtureFile('opaque'), [0]);
+      const select = selects()[0]!;
+      expect(getComputedStyle(select).appearance).not.toBe('base-select');
+      const labels = [...select.options].map((o) => o.label);
+      expect(labels).toHaveLength(8);
+      for (const label of labels) expect(label).toMatch(/^\S.* · ΔE \d+\.\d$/);
+      const ink = screen.container.querySelector<HTMLElement>('.pick .swatch.ink')!;
+      await userEvent.selectOptions(select, '3');
+      await expect.poll(() => ink.title).toBe(labels[3]!.replace(/ · ΔE .*$/, ''));
+    },
+  );
 });

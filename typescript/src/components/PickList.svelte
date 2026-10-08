@@ -41,8 +41,14 @@
               value={pick.alternatives.findIndex((a) => a.index === pick.ink.index)}
               onchange={(e) => onink(pick.id, Number(e.currentTarget.value))}
             >
+              <!-- Customizable select: swatches where supported, plain text elsewhere (Firefox). -->
+              <button><selectedcontent></selectedcontent></button>
               {#each pick.alternatives as alt, i (alt.index)}
-                <option value={i}>{alt.name} · ΔE {alt.deltaE.toFixed(1)}</option>
+                <option value={i}
+                  ><span class="option-swatch" style:background={css(alt.rgb)}></span><span
+                    class="option-text">{`${alt.name} · ΔE ${alt.deltaE.toFixed(1)}`}</span
+                  ></option
+                >
               {/each}
             </select>
           </label>
@@ -131,6 +137,47 @@
     border: 1px solid var(--border);
     background: var(--bg);
     color: var(--fg);
+  }
+  @supports (appearance: base-select) and selector(::picker(select)) {
+    select,
+    ::picker(select) {
+      appearance: base-select;
+    }
+    ::picker(select) {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--fg);
+    }
+    option {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.3rem 0.5rem;
+    }
+    option:checked {
+      font-weight: 600;
+    }
+    .option-swatch {
+      flex: none;
+      width: 1.1rem;
+      height: 1.1rem;
+      border-radius: 3px;
+      border: 1px solid var(--border);
+    }
+    selectedcontent {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      min-width: 0;
+    }
+    /* A name too long for the closed select ends in "…" instead of a cut-off glyph. */
+    selectedcontent .option-text {
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
   }
   .warning {
     font-size: 0.8rem;
