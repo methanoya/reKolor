@@ -43,8 +43,8 @@ impl Palette {
         self.inner.entries().len() as u32
     }
 
-    /// The suggestion for a color, with the existing rule (nearest real ink, unless a
-    /// non-palette entry is more than 1.5× closer).
+    /// The suggested entry for a color: the nearest one by CIEDE2000 (non-palette entries
+    /// included); ties go to the earlier entry.
     pub fn suggest(&self, color: Ts<Rgb>) -> SuggestOutcome {
         let outcome = color
             .to_rust()

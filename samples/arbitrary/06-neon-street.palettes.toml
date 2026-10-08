@@ -40,5 +40,5 @@ picks = [
   { rgba = [57, 37, 36, 255], ink = "Pantone 440" },
   { rgba = [167, 41, 176, 255], ink = "Pantone 253" },
   { rgba = [255, 238, 234, 255], ink = "Pantone 705" },
-  { rgba = [255, 255, 239, 255], ink = "Pantone 621" },
+  { rgba = [76, 41, 48, 255], ink = "Pantone 5185" },
 ]

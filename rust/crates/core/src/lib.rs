@@ -20,6 +20,6 @@ pub use analyze::{ImageStats, analyze};
 pub use color::{Rgb8, Rgba8, composite_over_white, delta_e_2000};
 pub use error::Error;
 pub use image::ImageRef;
-pub use palette::{NON_PALETTE_BIAS, NON_PALETTE_MARKER, Palette, PaletteEntry, PaletteMatch};
+pub use palette::{NON_PALETTE_MARKER, Palette, PaletteEntry, PaletteMatch};
 pub use pick::{ColorMismatch, PICK_MISMATCH_TOLERANCE, Pick, pick};
 pub use recolor::{Mapping, RecolorStats, recolor};

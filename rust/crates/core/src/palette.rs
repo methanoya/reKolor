@@ -7,10 +7,6 @@ use crate::{Error, Rgb8};
 /// "Pure White (non-palette)" and "Pure Black (non-palette)").
 pub const NON_PALETTE_MARKER: &str = "non-palette";
 
-/// The 2023 suggestion rule (`palette.ts`): a real ink is suggested unless the nearest
-/// non-palette entry is more than this many times closer (issue I5).
-pub const NON_PALETTE_BIAS: f32 = 1.5;
-
 /// One named palette color, e.g. `"Pantone 1235"`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaletteEntry {
@@ -62,33 +58,13 @@ impl Palette {
         &self.entries
     }
 
-    /// The suggestion the 2023 picker made: the nearest real ink, unless the nearest
-    /// non-palette entry is more than [`NON_PALETTE_BIAS`] times closer. Ties go to the
-    /// earlier entry.
+    /// The suggested entry for a color: the nearest one by CIEDE2000, real ink or not (I5: the
+    /// 2023 preference for real inks over pure white/black was dropped). Ties go to the earlier
+    /// entry.
     pub fn suggest(&self, color: Rgb8) -> PaletteMatch<'_> {
-        let mut best_ink: Option<PaletteMatch<'_>> = None;
-        let mut best_other: Option<PaletteMatch<'_>> = None;
-        for m in self.distances(color) {
-            let best = if m.entry.non_palette {
-                &mut best_other
-            } else {
-                &mut best_ink
-            };
-            if best.is_none_or(|b| m.delta_e < b.delta_e) {
-                *best = Some(m);
-            }
-        }
-        // 2023: `bestPaletteDistance < bestOutDistance * 1.5 ? bestPaletteColor : bestOutColor`.
-        // A missing side counts as infinitely far, as `Number.MAX_VALUE` did.
-        let ink_distance = best_ink.map_or(f32::INFINITY, |m| m.delta_e);
-        let other_distance = best_other.map_or(f32::INFINITY, |m| m.delta_e);
-        let prefer_ink = ink_distance < other_distance * NON_PALETTE_BIAS;
-        match (best_ink, best_other) {
-            (Some(ink), _) if prefer_ink => ink,
-            (_, Some(other)) => other,
-            (Some(ink), None) => ink,
-            (None, None) => unreachable!("Palette::new rejects empty palettes"),
-        }
+        self.distances(color)
+            .reduce(|best, m| if m.delta_e < best.delta_e { m } else { best })
+            .expect("Palette::new rejects empty palettes")
     }
 
     /// Up to `k` entries ordered by CIEDE2000 distance; ties go to the earlier entry.
@@ -139,15 +115,25 @@ mod tests {
     }
 
     #[test]
-    fn suggest_prefers_a_real_ink_unless_non_palette_is_much_closer() {
+    fn suggest_is_the_nearest_entry_even_when_it_is_non_palette() {
+        // I5: no preference for real inks. Pure white is the nearest entry here, but not 1.5×
+        // closer than the gray ink, so the 2023 rule would have suggested the gray.
         let p = palette(&[
             ("Pure White (non-palette)", [255, 255, 255]),
-            ("Off-white", [240, 240, 235]),
+            ("Gray", [230, 230, 230]),
         ]);
-        // Pure white is exactly white: infinitely closer.
-        assert_eq!(p.suggest(Rgb8::new(255, 255, 255)).index, 0);
-        // Exactly the off-white ink: distance 0 beats anything.
-        assert_eq!(p.suggest(Rgb8::new(240, 240, 235)).index, 1);
+        let color = Rgb8::new(244, 244, 244);
+        let (white, gray) = (
+            crate::delta_e_2000(color, Rgb8::new(255, 255, 255)),
+            crate::delta_e_2000(color, Rgb8::new(230, 230, 230)),
+        );
+        assert!(
+            white < gray && gray < 1.5 * white,
+            "precondition: {white} vs {gray}"
+        );
+        assert_eq!(p.suggest(color).entry.name, "Pure White (non-palette)");
+        // Exact colors are suggested exactly.
+        assert_eq!(p.suggest(Rgb8::new(230, 230, 230)).entry.name, "Gray");
     }
 
     #[test]

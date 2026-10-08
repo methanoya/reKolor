@@ -165,14 +165,22 @@ only when their decoded pixels differ.
   (`rust/src/`, `rust/examples/record_baseline.rs`). `crates/core` reproduced those 30 recolor outputs
   and the image info exactly, natively and in WASM.
 - Until behavior step 1, `pantone-suggestions.tsv` held the **2023 JavaScript** suggestions
-  (`typescript/src/palette.ts` with `color-diff`, recorded by `testdata/record_pantone_suggestions.cjs`).
+  (`typescript/src/palette.ts` with `color-diff`, recorded by `testdata/record_pantone_suggestions.cjs`,
+  since removed; both are in git history).
   The Rust suggestions matched all 5,096 by name; ΔE differed by at most 0.005 (f32 vs f64). That
   file is in git history; the snapshot now holds the Rust suggestions, for a new color set (the old one
   repeated after 256 of its 1,000 pseudo-random colors).
 
 ## Behavior
 
-The output still reproduces the existing behavior (R9), including its known issues (matching
-against inks, alpha composited over white, the 1.5× white/black preference, …). They are recorded
-as I1–I9 in the decision list and change one decision at a time; each change updates the baseline
-expectations or the golden outputs in the same commit, so its effect is a reviewed diff.
+The engine reproduces the existing recolor behavior (R9): nearest-ink matching, compositing over
+white, opaque output, earlier mapping wins ties. The behavior decisions (`.agents/behavior-issues/`,
+local) kept those; changes so far:
+
+- **I5:** `Palette::suggest` is the plain nearest entry (CIEDE2000, ties to the earlier entry). The
+  2023 preference for real inks over "Pure White/Black (non-palette)" was dropped; on the snapshot's
+  5,096 colors this changed 6 suggestions, all near-black or near-white. Golden configs keep their
+  stored inks, so the goldens didn't change.
+
+Each change updates the baseline snapshot (and, if pixels move, the goldens) in the same commit, so its
+effect is a reviewed diff.

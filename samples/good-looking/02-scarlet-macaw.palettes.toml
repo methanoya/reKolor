@@ -5,7 +5,7 @@
 [[palette]]
 size = 3
 picks = [
-  { rgba = [244, 239, 235, 255], ink = "Pantone 427" },
+  { rgba = [244, 239, 235, 255], ink = "Pure White (non-palette)" },
   { rgba = [0, 0, 32, 255], ink = "Pantone 2767" },
   { rgba = [193, 49, 48, 255], ink = "Pantone 1797" },
 ]
@@ -13,7 +13,7 @@ picks = [
 [[palette]]
 size = 7
 picks = [
-  { rgba = [244, 239, 235, 255], ink = "Pantone 427" },
+  { rgba = [244, 239, 235, 255], ink = "Pure White (non-palette)" },
   { rgba = [0, 0, 32, 255], ink = "Pantone 2767" },
   { rgba = [193, 49, 48, 255], ink = "Pantone 1797" },
   { rgba = [35, 86, 152, 255], ink = "Pantone 2945" },
@@ -25,7 +25,7 @@ picks = [
 [[palette]]
 size = 16
 picks = [
-  { rgba = [244, 239, 235, 255], ink = "Pantone 427" },
+  { rgba = [244, 239, 235, 255], ink = "Pure White (non-palette)" },
   { rgba = [0, 0, 32, 255], ink = "Pantone 2767" },
   { rgba = [193, 49, 48, 255], ink = "Pantone 1797" },
   { rgba = [35, 86, 152, 255], ink = "Pantone 2945" },
@@ -40,5 +40,5 @@ picks = [
   { rgba = [15, 29, 66, 255], ink = "Pantone 655" },
   { rgba = [84, 0, 0, 255], ink = "Pantone 490" },
   { rgba = [145, 18, 25, 255], ink = "Pantone 704" },
-  { rgba = [171, 59, 47, 255], ink = "Pantone 1805" },
+  { rgba = [225, 219, 207, 255], ink = "Pantone 427" },
 ]
