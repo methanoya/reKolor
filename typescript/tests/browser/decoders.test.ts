@@ -109,6 +109,7 @@ describe(`browser decoding vs rekolor-io (${server.browser})`, () => {
     let worst = 0;
     for (let i = 0; i < rust.length; i++)
       worst = Math.max(worst, Math.abs(got.rgba[i]! - rust[i]!));
+    expect(worst).toBeGreaterThan(0);
     console.info(
       `[decoders] ${server.browser}: ICC-profiled PNG, largest channel difference ${worst}`,
     );
