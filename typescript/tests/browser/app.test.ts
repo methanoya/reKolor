@@ -14,6 +14,8 @@ import { render } from 'vitest-browser-svelte';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import App from '../../src/App.svelte';
 import '../../src/app.css';
+import { EngineClient } from '../../src/lib/client';
+import { loadImage } from '../../src/lib/persist';
 import { fixtureFile } from './fixtures';
 import type {} from './mouse.commands';
 
@@ -65,6 +67,17 @@ describe('reKolor app', () => {
       expect(logo.getBoundingClientRect().height).toBeGreaterThan(0);
       expect(logo.getBoundingClientRect().height).toBeLessThanOrEqual(lineHeight);
     }
+    // The LogRocket logo links to the privacy page, in a new tab, and fits the line too.
+    const logRocket = screen.getByRole('link', {
+      name: 'Privacy: this site records visits with LogRocket',
+    });
+    await expect.element(logRocket).toHaveAttribute('href', '/privacy.html');
+    await expect.element(logRocket).toHaveAttribute('target', '_blank');
+    const logo = logRocket.element().querySelector('svg')!.getBoundingClientRect();
+    expect(logo.height).toBeGreaterThan(0);
+    expect(logo.height).toBeLessThanOrEqual(lineHeight);
+    // LogRocket's rocket mark: 18.2 × 28 units, so its width follows from its height.
+    expect(logo.width).toBeCloseTo((logo.height * 18.2) / 28, 0);
   });
 
   test('file names and images appear only inside parts LogRocket leaves out', async () => {
@@ -115,13 +128,25 @@ describe('reKolor app', () => {
     expect(exposed()).toEqual([]);
     await userEvent.keyboard('{Escape}');
 
+    // An uploaded palette's name (on the Picks line and in the status line).
+    const paletteInput =
+      screen.container.querySelector<HTMLInputElement>('input[accept^=".json"]')!;
+    await userEvent.upload(
+      page.elementLocator(paletteInput),
+      new File(['{"Ink": {"rgb": [1, 2, 3]}}'], `${secret} inks.json`),
+    );
+    await expect.element(screen.getByTestId('status')).toMatchTextContent(`${secret} inks`);
+    expect(exposed()).toEqual([]);
+
     // The image views (the user's image and its preview) and the file inputs are private too.
     for (const element of screen.container.querySelectorAll('canvas, input[type="file"]')) {
       expect(element.closest('[data-private]')).not.toBeNull();
     }
-    // Visitors learn what is recorded from the header's privacy link.
+    // Visitors learn what is recorded from the header's LogRocket logo (a link to the privacy page).
     await expect
-      .element(screen.getByRole('link', { name: 'Privacy' }))
+      .element(
+        screen.getByRole('link', { name: 'Privacy: this site records visits with LogRocket' }),
+      )
       .toHaveAttribute('href', '/privacy.html');
   });
 
@@ -608,6 +633,247 @@ describe('reKolor app', () => {
     context.drawImage(bitmap, 0, 0);
     return [...context.getImageData(x, y, 1, 1).data];
   }
+
+  /** 48 × 32 in three bands: red (columns 0–15), an orange-red near it (16–31), pink (32–47). */
+  async function threeBandsFile(): Promise<File> {
+    const canvas = new OffscreenCanvas(48, 32);
+    const context = canvas.getContext('2d')!;
+    for (const [x, color] of [
+      [0, 'rgb(230 76 60)'],
+      [16, 'rgb(233 95 80)'],
+      [32, 'rgb(240 140 150)'],
+    ] as const) {
+      context.fillStyle = color;
+      context.fillRect(x, 0, 16, 32);
+    }
+    return new File([await canvas.convertToBlob({ type: 'image/png' })], 'bands.png');
+  }
+
+  test("a pick's ΔE slider makes it take the colors around it, and export keeps it", async () => {
+    // Pick red (column 8) and pink (column 40); the orange-red between them is not picked.
+    const { screen } = await opened(await threeBandsFile(), [-16, 16]);
+    await expect.element(screen.getByText('Printed with 2 inks')).toBeVisible();
+    const red = await downloadedPixel(screen, 8, 16);
+    const pink = await downloadedPixel(screen, 40, 16);
+    // The orange-red takes the nearest ink: red's.
+    expect(await downloadedPixel(screen, 24, 16)).toEqual(red);
+
+    // Widen pink's capture radius to the slider's maximum: the orange-red is within it.
+    const sliders = () => [
+      ...screen.container.querySelectorAll<HTMLInputElement>('.pick-delta input'),
+    ];
+    expect(sliders().map((s) => [s.value, s.max])).toEqual([
+      ['0', '40'],
+      ['0', '40'],
+    ]);
+    sliders()[1]!.value = '40';
+    sliders()[1]!.dispatchEvent(new Event('input', { bubbles: true }));
+    await expect
+      .element(screen.getByRole('list', { name: 'Picked colors' }).getByRole('status').nth(1))
+      .toHaveTextContent('40');
+    await expect.element(screen.getByText('Printed with 2 inks')).toBeVisible();
+    await expect.poll(() => downloadedPixel(screen, 24, 16)).toEqual(pink);
+    // Red and pink themselves are unchanged (an exact match comes first).
+    expect(await downloadedPixel(screen, 8, 16)).toEqual(red);
+
+    // The exported config carries the radius, on pink's line only.
+    const download = captureDownload();
+    await screen.getByRole('button', { name: 'Export picks' }).click();
+    const text = await (await download).blob.text();
+    expect(text.match(/delta_e = 40/g)).toHaveLength(1);
+    expect(text).toMatch(/rgba = \[240, 140, 150, 255\], ink = "[^"]+", delta_e = 40 \}/);
+  });
+
+  test('an uploaded palette gives the picks its inks; download and "Use Pantone" work', async () => {
+    const { screen } = await opened(await threeBandsFile(), [-16]);
+    await expect.element(screen.getByText('Printed with 1 ink')).toBeVisible();
+    // The palette's name and size, from the "Download palette" link's tooltip.
+    const paletteName = () =>
+      /\((.*)\)/.exec(
+        screen.getByRole('button', { name: 'Download palette' }).element().getAttribute('title')!,
+      )![1];
+    const inkName = () => screen.container.querySelector('.pick .ink')!.getAttribute('title');
+    expect(paletteName()).toBe('Pantone, 909 inks');
+    expect(inkName()).toMatch(/^Pantone /);
+    expect(screen.getByRole('button', { name: 'Use Pantone' }).query()).toBeNull();
+
+    // Upload a two-ink palette: the red pick takes its nearest ink, "Shop Red".
+    const shop =
+      '{\n  "Shop Red": { "rgb": [220, 40, 40] },\n  "Shop Blue": { "rgb": [30, 60, 200] }\n}\n';
+    const paletteInput =
+      screen.container.querySelector<HTMLInputElement>('input[accept^=".json"]')!;
+    await userEvent.upload(page.elementLocator(paletteInput), new File([shop], 'shop.json'));
+    await expect.element(screen.getByTestId('status')).toMatchTextContent(/^Palette shop: 2 inks/);
+    expect(paletteName()).toBe('shop, 2 inks');
+    expect(inkName()).toBe('Shop Red');
+    await expect.element(screen.getByRole('button', { name: 'Use Pantone' })).toBeVisible();
+
+    // "Download palette" gives back the uploaded file.
+    let download = captureDownload();
+    await screen.getByRole('button', { name: 'Download palette' }).click();
+    expect((await download).name).toBe('shop.json');
+    expect(await (await download).blob.text()).toBe(shop);
+
+    // Configs name the palette's inks.
+    download = captureDownload();
+    await screen.getByRole('button', { name: 'Export picks' }).click();
+    expect(await (await download).blob.text()).toContain('ink = "Shop Red"');
+
+    // A broken palette is refused; the current one stays.
+    await userEvent.upload(
+      page.elementLocator(paletteInput),
+      new File(['{"x": {}}'], 'broken.json'),
+    );
+    await expect.element(screen.getByRole('alert')).toMatchTextContent(/broken\.json: .*rgb/);
+    expect(paletteName()).toBe('shop, 2 inks');
+
+    // Back to Pantone.
+    await screen.getByRole('button', { name: 'Use Pantone' }).click();
+    await expect
+      .element(screen.getByTestId('status'))
+      .toMatchTextContent(/^Palette Pantone: 909 inks/);
+    expect(paletteName()).toBe('Pantone, 909 inks');
+    expect(inkName()).toMatch(/^Pantone /);
+    expect(screen.getByRole('button', { name: 'Use Pantone' }).query()).toBeNull();
+    download = captureDownload();
+    await screen.getByRole('button', { name: 'Download palette' }).click();
+    expect((await download).name).toBe('pantone.json');
+  });
+
+  /**
+   * Replaces the engine's `nearestEach` (re-inking the picks after a palette switch) for the rest
+   * of the test: every engine call gets a stand-in for the engine whose `nearestEach` runs
+   * `replacement` (which may call the real one).
+   */
+  function replaceNearestEach(
+    replacement: (real: (...args: unknown[]) => Promise<unknown>, args: unknown[]) => unknown,
+  ) {
+    type Call = EngineClient['call'];
+    const realCall: Call = EngineClient.prototype.call;
+    vi.spyOn(EngineClient.prototype, 'call').mockImplementation(function (this: EngineClient, f) {
+      return realCall.call(this, (api) =>
+        f(
+          new Proxy(api, {
+            get(target, key) {
+              if (key !== 'nearestEach') return Reflect.get(target, key) as unknown;
+              const real = (...args: unknown[]) =>
+                (target.nearestEach as (...a: unknown[]) => Promise<unknown>)(...args);
+              return (...args: unknown[]) => replacement(real, args);
+            },
+          }),
+        ),
+      );
+    });
+  }
+
+  /** The palette's name and size, from the "Download palette" link's tooltip. */
+  const paletteOf = (screen: { getByRole: typeof page.getByRole }) =>
+    /\((.*)\)/.exec(
+      screen.getByRole('button', { name: 'Download palette' }).element().getAttribute('title')!,
+    )![1];
+  const savedSession = () =>
+    JSON.parse(sessionStorage.getItem('rekolor.session')!) as {
+      palette?: { name: string };
+      picks: { ink: { name: string } }[];
+    };
+  const shopPalette = () =>
+    new File(
+      ['{"Shop Red": {"rgb": [220, 40, 40]}, "Shop Blue": {"rgb": [30, 60, 200]}}'],
+      'shop.json',
+    );
+
+  test("a palette switch changes the palette and the picks' inks together", async () => {
+    const { screen } = await opened(await threeBandsFile(), [-16]);
+    await expect.element(screen.getByText('Printed with 1 ink')).toBeVisible();
+    // Re-inking the picks is held back until the test releases it.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let asked = false;
+    replaceNearestEach(async (real, args) => {
+      asked = true;
+      await held;
+      return real(...args);
+    });
+    const paletteInput =
+      screen.container.querySelector<HTMLInputElement>('input[accept^=".json"]')!;
+    await userEvent.upload(page.elementLocator(paletteInput), shopPalette());
+    await expect.poll(() => asked).toBe(true);
+
+    // The worker has the new palette, but the page and the saved session still show the old one,
+    // with its inks.
+    const inkName = () => screen.container.querySelector('.pick .ink')!.getAttribute('title');
+    expect(paletteOf(screen)).toBe('Pantone, 909 inks');
+    expect(inkName()).toMatch(/^Pantone /);
+    expect(savedSession().palette).toBeUndefined();
+    expect(savedSession().picks[0]!.ink.name).toMatch(/^Pantone /);
+
+    // Then everything changes at once.
+    release();
+    await expect.element(screen.getByTestId('status')).toMatchTextContent(/^Palette shop/);
+    expect(paletteOf(screen)).toBe('shop, 2 inks');
+    expect(inkName()).toBe('Shop Red');
+    await expect.poll(() => savedSession().palette?.name).toBe('shop');
+    expect(savedSession().picks[0]!.ink.name).toBe('Shop Red');
+  });
+
+  test("if the picks can't be re-inked, the palette stays as it was", async () => {
+    const { screen } = await opened(await threeBandsFile(), [-16]);
+    await expect.element(screen.getByText('Printed with 1 ink')).toBeVisible();
+    replaceNearestEach(() => ({
+      status: 'error',
+      error: { kind: 'invalidPalette', message: 'test: no inks for the picks' },
+    }));
+    const paletteInput =
+      screen.container.querySelector<HTMLInputElement>('input[accept^=".json"]')!;
+    await userEvent.upload(page.elementLocator(paletteInput), shopPalette());
+    await expect.element(screen.getByRole('alert')).toMatchTextContent(/no inks for the picks/);
+    expect(paletteOf(screen)).toBe('Pantone, 909 inks');
+    expect(screen.container.querySelector('.pick .ink')!.getAttribute('title')).toMatch(
+      /^Pantone /,
+    );
+    // The worker went back to Pantone too.
+    const download = captureDownload();
+    await screen.getByRole('button', { name: 'Download palette' }).click();
+    expect((await download).name).toBe('pantone.json');
+    expect(await (await download).blob.text()).toContain('"Pantone 100"');
+  });
+
+  test('a reload brings back the image, picks, ΔE, material and palette', async () => {
+    const { screen } = await opened(await threeBandsFile(), [-16]);
+    await expect.element(screen.getByText('Printed with 1 ink')).toBeVisible();
+    // An uploaded palette, a capture radius and a black material.
+    const shop = '{"Shop Red": {"rgb": [220, 40, 40]}, "Shop Blue": {"rgb": [30, 60, 200]}}';
+    const paletteInput =
+      screen.container.querySelector<HTMLInputElement>('input[accept^=".json"]')!;
+    await userEvent.upload(page.elementLocator(paletteInput), new File([shop], 'shop.json'));
+    await expect.element(screen.getByTestId('status')).toMatchTextContent(/^Palette shop/);
+    const slider = screen.container.querySelector<HTMLInputElement>('.pick-delta input')!;
+    slider.value = '15';
+    slider.dispatchEvent(new Event('input', { bubbles: true }));
+    await screen.getByRole('button', { name: 'Black' }).click();
+    await expect
+      .element(screen.getByText(/^Printed with 1 ink · 1 color left to the material$/))
+      .toBeVisible();
+    // The image is written to IndexedDB in the background.
+    await expect.poll(async () => (await loadImage())?.name, { timeout: 15_000 }).toBe('bands.png');
+
+    // "Reload": the app starts again on the same page, with the same storage.
+    screen.unmount();
+    const again = await render(App);
+    await expect
+      .element(again.getByTestId('status'))
+      .toHaveTextContent('Restored bands.png with 1 pick.');
+    await expect.element(again.getByTestId('file-info')).toMatchTextContent('bands.png');
+    await expect
+      .element(again.getByRole('button', { name: 'Download palette' }))
+      .toHaveAttribute('title', 'Save the palette (shop, 2 inks) as JSON');
+    expect(again.container.querySelector('.pick .ink')!.getAttribute('title')).toBe('Shop Red');
+    expect(again.container.querySelector<HTMLInputElement>('.pick-delta input')!.value).toBe('15');
+    await expect.element(again.getByTestId('material')).toHaveValue('#000000');
+    await expect
+      .element(again.getByText(/^Printed with 1 ink · 1 color left to the material$/))
+      .toBeVisible();
+  });
 
   test('no material at first; a chosen one is behind the preview only', async () => {
     const { screen, click, status } = await opened(await materialFile(), []);

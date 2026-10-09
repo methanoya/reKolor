@@ -137,6 +137,22 @@ export class Session {
     return this.#engine.nearest(color, k);
   }
 
+  /** The nearest inks for each color, in order (one call for a whole pick list). */
+  nearestEach(colors: Rgb[], k?: number): AppOutcome<PaletteMatch[][]> {
+    const all: PaletteMatch[][] = [];
+    for (const color of colors) {
+      const nearest = this.#engine.nearest(color, k);
+      if (nearest.status === 'error') return nearest;
+      all.push(nearest.value);
+    }
+    return ok(all);
+  }
+
+  /** Replaces the palette (see `Engine.setPalette`); the open image stays. */
+  setPalette(paletteJson: string): AppOutcome<number> {
+    return this.#engine.setPalette(paletteJson);
+  }
+
   unprintedColors(
     colors: Rgb[],
     material: Rgb,

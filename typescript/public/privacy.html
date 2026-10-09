@@ -67,6 +67,13 @@
       reKolor works in your browser. The images and palette files you open are processed on your
       device; the app doesn't upload them anywhere.
     </p>
+    <p>
+      So that reloading the page doesn't lose your work, the app keeps the open image, your picks,
+      the material, the unprinted colors and an uploaded palette in your browser's storage for this
+      tab (session storage and IndexedDB). They stay on your device. Closing the tab clears the
+      session data. In browsers with Web Locks, the image is deleted the next time you open the app;
+      without Web Locks, the app does not keep the image across reloads.
+    </p>
 
     <h2>This site records visits</h2>
     <p>
@@ -90,16 +97,20 @@
       </li>
       <li>
         A few named events, with numbers only: an image opened (its format, size in pixels and
-        number of colors), picks added, removed or cleared, palettes imported or exported, and a PNG
-        downloaded (how many picks and inks). And the kind of any error the app shows, such as "the
-        browser couldn't decode the file", without its message.
+        number of colors), picks added, removed or cleared, palettes imported or exported, a PNG
+        downloaded (how many picks and inks), and an ink palette uploaded, downloaded or reset to
+        Pantone (how many inks). And the kind of any error the app shows, such as "the browser
+        couldn't decode the file", without its message.
       </li>
     </ul>
 
     <h2>What is not recorded</h2>
     <ul>
       <li>Your images, and the previews made from them.</li>
-      <li>The names of your files: the parts of the page that show them are left out.</li>
+      <li>
+        The names of your files, an uploaded ink palette's included: the parts of the page that show
+        them are left out.
+      </li>
       <li>Your IP address: this site tells LogRocket not to store it.</li>
       <li>Network requests.</li>
     </ul>

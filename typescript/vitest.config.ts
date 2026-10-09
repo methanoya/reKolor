@@ -22,6 +22,8 @@ export default defineConfig((env) =>
           test: {
             name: 'browser',
             include: ['tests/browser/**/*.test.ts'],
+            // Clears the work the app keeps across reloads before each test.
+            setupFiles: ['tests/browser/setup.ts'],
             testTimeout: 30_000,
             browser: {
               enabled: true,

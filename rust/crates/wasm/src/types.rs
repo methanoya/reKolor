@@ -26,11 +26,17 @@ pub struct Rgba {
     pub a: u8,
 }
 
+// `#[tsify(optional)]` + `#[serde(default)]`: `deltaE` may be left out (it is then 0).
 /// One picked color and the ink that replaces it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Tsify)]
 pub struct Mapping {
     pub source: Rgb,
     pub ink: Rgb,
+    /// The pick's capture radius (CIEDE2000, 0 to 100): pixels within it of `source` take this
+    /// ink before the nearest-ink rule. 0 or absent: only an exact match.
+    #[tsify(optional)]
+    #[serde(default, rename = "deltaE")]
+    pub delta_e: f32,
 }
 
 // `rename_all = "camelCase"` writes Rust's `delta_e` as `deltaE` in JavaScript.
@@ -84,7 +90,9 @@ pub struct UnprintedColors {
 pub struct RecolorStats {
     /// Pixels whose composited color equals a mapping's source exactly.
     pub exact: f64,
-    /// Pixels that took the nearest ink. Unprinted pixels are counted in neither field.
+    /// Pixels within a mapping's capture radius (`deltaE`), not equal to its source.
+    pub captured: f64,
+    /// Pixels that took the nearest ink. Unprinted pixels are counted in none of the fields.
     pub nearest: f64,
 }
 
@@ -203,6 +211,7 @@ impl From<Mapping> for core::Mapping {
         Self {
             source: m.source.into(),
             ink: m.ink.into(),
+            delta_e: m.delta_e,
         }
     }
 }
@@ -212,6 +221,7 @@ impl From<core::RecolorStats> for RecolorStats {
         // Counts are at most width × height, far below 2^53, so they're exact as JS numbers.
         Self {
             exact: s.exact as f64,
+            captured: s.captured as f64,
             nearest: s.nearest as f64,
         }
     }

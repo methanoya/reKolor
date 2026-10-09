@@ -1,20 +1,21 @@
 // Recreates the README screenshot (`screenshot.png` at the project root): the web app with an image
 // from this folder open and its palette config imported. How and when to run it: `screenshot.md`.
 //
-//   node publish/screenshot.mjs
+//   node publish/screenshot.ts
 //
 // Builds the web app, serves the build locally, opens it in Chromium, and writes the whole page to
 // `screenshot.png`. Exits non-zero if a step fails.
+// Node 24 runs this `.ts` file directly, stripping its erasable types before execution.
 
-// A plain Node.js script (`.mjs`: a JavaScript module), so it can use `await` at the top level.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { Browser, Locator } from '../typescript/node_modules/playwright/index.js';
 
 // Paths, relative to this file's folder.
-const here = (relative) => fileURLToPath(new URL(relative, import.meta.url));
+const here = (relative: string) => fileURLToPath(new URL(relative, import.meta.url));
 const web = here('../typescript/');
 const out = here('../screenshot.png');
 const port = 4180;
@@ -39,11 +40,16 @@ const config = here(`${pair[1]}.palettes.toml`);
 console.log(`image: ${pair[0]}, config: ${pair[1]}.palettes.toml`);
 
 // Playwright is a dependency of the web app, not of this folder: load it from there.
-const { chromium } = createRequire(`${web}package.json`)('playwright');
+const { chromium } = createRequire(`${web}package.json`)(
+  'playwright',
+) as typeof import('../typescript/node_modules/playwright/index.js');
 
 // The production build, served at the root (`/`). Vite is run directly, not through `npm` or `npx`,
 // so stopping it at the end stops the server itself.
-const built = spawnSync('npm', ['run', 'build'], { cwd: web, stdio: 'inherit' });
+const built = spawnSync('npm', ['run', 'build'], {
+  cwd: web,
+  stdio: 'inherit',
+});
 if (built.status !== 0) process.exit(built.status ?? 1);
 const server = spawn(
   process.execPath,
@@ -68,11 +74,8 @@ try {
   server.kill();
 }
 
-/**
- * Opens the app, opens the image, imports the config, and writes the screenshot.
- * @param {import('playwright').Browser} browser
- */
-async function capture(browser) {
+/** Opens the app, opens the image, imports the config, and writes the screenshot. */
+async function capture(browser: Browser) {
   // The size the screenshot is taken at: 1280 CSS pixels wide, one device pixel each, light theme.
   // The capture covers the whole page, so its height is whatever the page needs.
   const page = await browser.newPage({
@@ -86,8 +89,7 @@ async function capture(browser) {
   // Waits for `target`; if the app shows an error first (a file it can't read, say), stops with the
   // app's message instead of a timeout.
   const alert = page.getByRole('alert');
-  /** @param {import('playwright').Locator} target */
-  const shown = async (target, timeout = 20_000) => {
+  const shown = async (target: Locator, timeout = 20_000) => {
     await target.or(alert).first().waitFor({ timeout });
     if (await alert.isVisible()) throw new Error(`the app says: ${await alert.textContent()}`);
   };
@@ -131,7 +133,7 @@ async function waitForServer() {
     } catch {
       // Not listening yet.
     }
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await new Promise<void>((resolve) => setTimeout(resolve, 200));
   }
   throw new Error(`the preview server didn't start on port ${port}`);
 }

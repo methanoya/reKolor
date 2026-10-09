@@ -181,12 +181,13 @@ fn run(cli: Cli) -> Result<()> {
             let image = decode(&args.input)?;
             let stats = recolor_to_file(&image, &mappings, material, &ranges, &args.output)?;
             println!(
-                "{} → {} ({} picks on {}; {} exact, {} unprinted, {} nearest pixels)",
+                "{} → {} ({} picks on {}; {} exact, {} captured, {} unprinted, {} nearest pixels)",
                 args.input.display(),
                 args.output.display(),
                 mappings.len(),
                 describe(material),
                 stats.exact,
+                stats.captured,
                 stats.unprinted,
                 stats.nearest
             );
@@ -232,6 +233,7 @@ fn run(cli: Cli) -> Result<()> {
                                 .map(|p| ConfigPick {
                                     rgba: [p.rgba.r, p.rgba.g, p.rgba.b, p.rgba.a],
                                     ink: palette.entries()[p.ink_index].name.clone(),
+                                    delta_e: 0.0,
                                 })
                                 .collect(),
                         })
@@ -431,5 +433,6 @@ fn parse_pick(text: &str, palette: &Palette) -> Result<Mapping> {
     Ok(Mapping {
         source,
         ink: entry.rgb,
+        delta_e: 0.0,
     })
 }

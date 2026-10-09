@@ -41,6 +41,11 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+      # `typescript-eslint` pins its scoped packages to the same exact version. Let Dependabot
+      # resolve that peer family together even when it has not aged out of the general cooldown.
+      exclude:
+        - typescript-eslint
+        - '@typescript-eslint/*'
     ignore:
       - dependency-name: rekolor-wasm
     groups:

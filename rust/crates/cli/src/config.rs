@@ -66,6 +66,7 @@ mod tests {
                 picks: vec![ConfigPick {
                     rgba: [210, 120, 40, 255],
                     ink: "Pantone 1595".into(),
+                    delta_e: 0.0,
                 }],
             }],
         };

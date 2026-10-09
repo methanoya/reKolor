@@ -99,16 +99,46 @@ main thread (Svelte)                      worker (src/lib/worker.ts)
 - **Live recolor:** at most one recolor runs and one waits (the newest picks); every result carries
   the image generation and pick revision, and only the current one is shown or downloaded. A failed
   open keeps the previous image (its generation changes only when an open succeeds).
-- **Pick-list changes** (pick, move, ink change, remove, clear, import) run one at a time in the order they
-  were made. At most 256 picks (the palette-config limit).
+- **Pick-list changes** (pick, move, ink change, ΔE, remove, clear, import, palette switch) run one
+  at a time in the order they were made. At most 256 picks (the palette-config limit).
+- **The ink palette** is the built-in `../palettes/pantone.json`, or a `*.json` file the user
+  uploads ("Upload palette…" on the Picks line; at most 1 MB and 10,000 inks), in the same format
+  (`../palettes/palette.schema.json`, checked against the reader in `src/lib/palette.test.ts`). The
+  worker swaps the palette and keeps the open image; every pick then gets the new palette's nearest
+  ink (its ΔE stays). The page (and the saved session) changes palette and inks in one step, after
+  the new inks are known; if re-inking fails, the worker goes back to the previous palette.
+  "Download palette" saves the current one, "Use Pantone" goes back. Config imports and exports name
+  the current palette's inks. A restarted worker starts with Pantone, so the app hands it the
+  uploaded palette again. The palette's name (an uploaded file's name) is private in LogRocket
+  recordings.
+- **A pick's ΔE** (its slider, 0–40; up to 100 from a file) is its capture radius: colors within it
+  (CIEDE2000) of the pick's color print with its ink, before the nearest-ink rule (see "Capture
+  radius" in `../rust/README.md`). A new pick starts at 0 (only its exact color); moving a pick
+  keeps it; a slider drag is one coalesced change, like an unprinted color's.
 - **Download** encodes the current result at full resolution (PNG, in the worker); if the image or
   picks change while it encodes, nothing is saved.
 - **Palette configs:** import/export the picks as `*.palettes.toml`, the CLI's golden-set format,
   read and written by the shared Rust crate `rekolor-config`. Export always writes the material and
-  the unprinted colors; import sets them from the file (white and none if the file has no such lines)
-  and keeps the file's picks as written. The file is the whole state: an import replaces the picks,
-  the material and the unprinted colors. A white material counts as chosen only if the file lists
-  the material's own color as unprinted.
+  the unprinted colors, and each pick's `delta_e` when it isn't 0; import sets them from the file
+  (white and none if the file has no such lines) and keeps the file's picks as written. The file is
+  the whole state: an import replaces the picks, the material and the unprinted colors. A white
+  material counts as chosen only if the file lists the material's own color as unprinted.
+- **Reloads keep the work** (`src/lib/persist.ts`): the picks, the material, the unprinted colors
+  and an uploaded palette go to `sessionStorage` (per tab, about 5 MB) after every change; the open
+  image goes to IndexedDB (no practical size limit), stored as bytes (WebKit can't store a `File` in
+  a private window), under the tab's ID. Each open page holds a Web Lock named after its tab; a
+  starting page deletes images whose tab holds no lock (closed tabs), after a 3-second grace for
+  tabs that are reloading. A duplicated tab finds its copied ID's lock taken and takes a new ID with
+  a copy of the image. Without Web Locks (an old browser, or a page not served over HTTPS) a closed
+  tab's image could never be deleted, so the image isn't kept at all; the rest still is. At the
+  first start the app restores, in order: the palette, the material, the image (only the one the
+  state was saved with), then the picks and unprinted colors exactly as they were, unless the user
+  has opened an image meanwhile (theirs wins). Nothing is saved before that, so a fresh start can't
+  overwrite it; and if the saved image can't come back (missing, a different file, unreadable), the
+  saved session stays until the next change, so a reload can try again. Image saves are numbered and
+  only the newest writes, and the saved state names the image only once its bytes are stored, so a
+  reload never pairs picks with another image. A save that doesn't fit leaves the previous one.
+  Browser tests clear both stores first (`tests/browser/setup.ts`).
 - **Errors** come back as values (`AppOutcome`); a crashed worker is restarted and the user is told.
 
 ## Session recording (LogRocket)
@@ -118,8 +148,9 @@ The published site records visits with [LogRocket](https://logrocket.com). `src/
 - **Where:** only on the published site. Everywhere else (the dev server, `vite preview`, the tests, CI's smoke test) LogRocket isn't even loaded:
   it is a separate file of the build, loaded with `import()` on the published site only, because
   loading it already contacts LogRocket's servers.
-- **Visitors are told** on the privacy page, `public/privacy.html`, linked as "Privacy" from the
-  header. It lists what is and isn't recorded; keep it in step with `src/lib/logrocket.ts`.
+- **Visitors are told** on the privacy page, `public/privacy.html`, linked from the LogRocket logo
+  at the right end of the header. It lists what is and isn't recorded; keep it in step with
+  `src/lib/logrocket.ts`.
 - **What is recorded:** the page's layout and text, clicks and other input (such as the material
   color and the inks), console output, uncaught errors, performance data, and the browser's details
   (type, system, screen, language, referring page), plus the events and error kinds below.
@@ -137,18 +168,21 @@ The published site records visits with [LogRocket](https://logrocket.com). `src/
   aren't anonymous: the browser's details are recorded.
 - **Events** (`track`), searchable in LogRocket as custom events:
 
-| Event          | When                                    | Properties                                 |
-| -------------- | --------------------------------------- | ------------------------------------------ |
-| Image opened   | an image is open and its colors counted | `format` (\*), `width`, `height`, `colors` |
-| Pick added     | a click on the original adds a pick     | `picks` (the count after)                  |
-| Pick removed   | a pick's × button                       | `picks` (the count after)                  |
-| Picks cleared  | "Clear all"                             | `removed`                                  |
-| Picks imported | a palette config is imported            | `size`, `picks`, `unprinted`               |
-| Picks exported | "Export picks"                          | `picks`, `unprinted`                       |
-| PNG downloaded | "Download PNG"                          | `picks`, `inks` (distinct inks)            |
+| Event              | When                                    | Properties                                 |
+| ------------------ | --------------------------------------- | ------------------------------------------ |
+| Image opened       | an image is open and its colors counted | `format` (\*), `width`, `height`, `colors` |
+| Pick added         | a click on the original adds a pick     | `picks` (the count after)                  |
+| Pick removed       | a pick's × button                       | `picks` (the count after)                  |
+| Picks cleared      | "Clear all"                             | `removed`                                  |
+| Picks imported     | a palette config is imported            | `size`, `picks`, `unprinted`               |
+| Picks exported     | "Export picks"                          | `picks`, `unprinted`                       |
+| PNG downloaded     | "Download PNG"                          | `picks`, `inks` (distinct inks)            |
+| Palette uploaded   | "Upload palette…" (a valid palette)     | `inks`                                     |
+| Palette downloaded | "Download palette"                      | `custom`, `inks`                           |
+| Palette reset      | "Use Pantone"                           | none                                       |
 
-(\*) A name from a fixed list (`imageFormat` in `src/lib/logrocket.ts`), found from the file's type or,
-without one, its extension; anything else is `other`, so no part of a file name is sent.
+(\*) A name from a fixed list (`imageFormat` in `src/lib/logrocket.ts`), found from the file's type
+or, without one, its extension; anything else is `other`, so no part of a file name is sent.
 
 Tests: `src/lib/logrocket.test.ts` (with LogRocket replaced by a fake); in the browser,
 `tests/browser/app.test.ts` (the private parts and the privacy link) and
@@ -185,3 +219,8 @@ are drawn from [Simple Icons](https://simpleicons.org) 16.32.0 (CC0). The Rust l
 Foundation's, licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) (see the
 [Rust media guide](https://www.rust-lang.org/policies/media-guide)). The logos are trademarks of
 their owners and link to their projects' sites.
+
+The LogRocket logo at the right end of the header (`src/components/LogRocketLink.svelte`) is
+LogRocket's rocket mark, taken from the logotype in the header of
+[logrocket.com](https://logrocket.com); it is a trademark of LogRocket, Inc., used to name the
+service the site records visits with, and links to the privacy page.

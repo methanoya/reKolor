@@ -48,6 +48,7 @@ fn main() {
                 .map(|&(source, ink)| Mapping {
                     source: source.into(),
                     ink: ink.into(),
+                    delta_e: 0.0,
                 })
                 .collect();
             let mut out = vec![0; fixture.rgba.len()];

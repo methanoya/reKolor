@@ -72,6 +72,24 @@ export class Engine {
     return this.#palette.length;
   }
 
+  /**
+   * Replaces the palette with another one (`palettes/pantone.json` format), keeping the open
+   * image. On error (an `invalidPalette` outcome) the current palette stays.
+   */
+  setPalette(paletteJson: string): AppOutcome<number> {
+    let data;
+    try {
+      data = parsePaletteJson(paletteJson);
+    } catch (e) {
+      return err('invalidPalette', (e as Error).message);
+    }
+    const palette = Palette.create(data);
+    if (palette.status === 'error') return err('invalidPalette', palette.error.message);
+    this.#palette.free();
+    this.#palette = palette.value;
+    return ok(palette.value.length);
+  }
+
   get image(): ImageSize | undefined {
     // `a && b` gives `a` if it is falsy (here `undefined`), otherwise `b`.
     return this.#image && { width: this.#image.width, height: this.#image.height };

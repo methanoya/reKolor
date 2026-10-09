@@ -13,6 +13,9 @@ export const LIMITS = {
   pixels: 24_000_000,
   /** Palette config import. */
   configBytes: 256 * 1024,
+  /** An uploaded ink palette (`*.json`): its file size, and its number of inks. */
+  paletteBytes: 1024 * 1024,
+  paletteInks: 10_000,
   /** Picks (= recolor mappings), the same limit as a config section and WASM `recolor`. */
   picks: 256,
   /**

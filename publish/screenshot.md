@@ -20,7 +20,7 @@ are ignored.
 From the project root, once the setup below is done:
 
 ```sh
-node publish/screenshot.mjs
+node publish/screenshot.ts
 ```
 
 The script builds the web app (`npm run build` in `typescript/`, which rewrites `typescript/dist/`),

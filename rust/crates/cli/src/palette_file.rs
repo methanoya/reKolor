@@ -25,8 +25,9 @@ pub fn find_default(start: &Path) -> Result<PathBuf> {
     )
 }
 
-/// Loads a palette file: a JSON object `{ "<name>": { "rgb": [r, g, b] }, … }`.
-/// Entries keep the file order, which decides ties between equal colors.
+/// Loads a palette file: a JSON object `{ "<name>": { "rgb": [r, g, b] }, … }`, as described by
+/// `palettes/palette.schema.json` (at least one ink, non-empty names). Entries keep the file order,
+/// which decides ties between equal colors.
 pub fn load(path: &Path) -> Result<Palette> {
     let text =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
@@ -43,6 +44,9 @@ pub fn parse(json: &str) -> Result<Palette> {
     };
     let mut entries = Vec::with_capacity(object.len());
     for (name, entry) in object {
+        if name.is_empty() {
+            bail!("every ink needs a name");
+        }
         // Reading into `[u8; 3]` checks the shape for free: exactly three numbers, each 0–255.
         let rgb: [u8; 3] = serde_json::from_value(entry["rgb"].clone())
             .with_context(|| format!("entry {name:?}: \"rgb\" must be three numbers 0–255"))?;
@@ -72,6 +76,34 @@ mod tests {
         assert!(parse(r#"{"X": {"rgb": [1, 2]}}"#).is_err());
         assert!(parse(r#"{"X": {"rgb": [1, 2, 300]}}"#).is_err());
         assert!(parse("{}").is_err()); // empty palette
+    }
+
+    // The same cases as the web app's test of its reader against `palettes/palette.schema.json`
+    // (`typescript/src/lib/palette.test.ts`), so the schema, the web app and the CLI agree.
+    #[test]
+    fn accepts_exactly_what_the_schema_describes() {
+        for text in [
+            r#"{"a": {"rgb": [1, 2, 3]}}"#,
+            r#"{"a": {"rgb": [0, 0, 0], "note": "ignored"}}"#,
+        ] {
+            assert!(parse(text).is_ok(), "{text}");
+        }
+        for text in [
+            "[]",
+            r#""red""#,
+            "{}",
+            r#"{"": {"rgb": [1, 2, 3]}}"#,
+            r#"{"a": {}}"#,
+            r#"{"a": {"rgb": [1, 2]}}"#,
+            r#"{"a": {"rgb": [1, 2, 3, 4]}}"#,
+            r#"{"a": {"rgb": [1, 2, 300]}}"#,
+            r#"{"a": {"rgb": [1, 2, -1]}}"#,
+            r#"{"a": {"rgb": [1.5, 2, 3]}}"#,
+            r#"{"a": {"rgb": "red"}}"#,
+            r#"{"a": [1, 2, 3]}"#,
+        ] {
+            assert!(parse(text).is_err(), "{text}");
+        }
     }
 
     #[test]

@@ -135,23 +135,27 @@ fn white() -> [u8; 3] {
 
 // One `[[palette]]` section of the file: a palette size and its picks. In TOML, `[[name]]` starts
 // one entry of a list of tables, so a file can have several sections.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SizedPalette {
     pub size: u32,
     pub picks: Vec<ConfigPick>,
 }
 
-// One pick as written: the pixel color (RGBA) and the ink's name in the palette file.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+// One pick as written: the pixel color (RGBA), the ink's name in the palette file, and the
+// pick's capture radius (`#[serde(default)]`: 0 when the line has no `delta_e`).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigPick {
     pub rgba: [u8; 4],
     pub ink: String,
+    /// The pick's capture radius (CIEDE2000, 0 to 100): colors within it take this pick's ink.
+    #[serde(default)]
+    pub delta_e: f32,
 }
 
 /// A pick resolved against a palette: what the app and the recolorer need.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResolvedPick {
     /// The stored pixel color from the config.
     pub rgba: Rgba8,
@@ -159,6 +163,8 @@ pub struct ResolvedPick {
     pub matching: Rgb8,
     /// The ink's position in the palette.
     pub index: usize,
+    /// The pick's capture radius (see [`ConfigPick::delta_e`]).
+    pub delta_e: f32,
 }
 
 // Everything that can be wrong with a config, each with the message shown to the user. In an
@@ -185,6 +191,8 @@ pub enum ConfigError {
     TooManyUnprinted { count: usize },
     #[error("an unprinted color's delta_e must be from 0 to 100, got {0}")]
     UnprintedDeltaE(f32),
+    #[error("a pick's delta_e must be from 0 to 100, got {0}")]
+    PickDeltaE(f32),
     #[error("the material is listed as unprinted more than once")]
     DuplicateMaterialUnprinted,
 }
@@ -296,8 +304,14 @@ impl PaletteConfig {
             for pick in &palette.picks {
                 let [r, g, b, a] = pick.rgba;
                 let ink = basic_string(&pick.ink);
+                // `delta_e` only when set, so configs without capture radii keep their old lines.
+                let delta_e = if pick.delta_e == 0.0 {
+                    String::new()
+                } else {
+                    format!(", delta_e = {}", pick.delta_e)
+                };
                 out.push_str(&format!(
-                    "  {{ rgba = [{r}, {g}, {b}, {a}], ink = {ink} }},\n"
+                    "  {{ rgba = [{r}, {g}, {b}, {a}], ink = {ink}{delta_e} }},\n"
                 ));
             }
             out.push_str("]\n");
@@ -360,6 +374,13 @@ impl SizedPalette {
                 count: self.picks.len(),
             });
         }
+        if let Some(pick) = self
+            .picks
+            .iter()
+            .find(|p| !(0.0..=100.0).contains(&p.delta_e))
+        {
+            return Err(ConfigError::PickDeltaE(pick.delta_e));
+        }
         // Several picks may share an ink, so count the distinct ink names, not the picks.
         let inks: HashSet<&str> = self.picks.iter().map(|p| p.ink.as_str()).collect();
         if inks.len() > self.size as usize {
@@ -394,6 +415,7 @@ impl SizedPalette {
                     rgba,
                     matching: composite(rgba, material),
                     index,
+                    delta_e: pick.delta_e,
                 })
             })
             .collect()
@@ -408,6 +430,7 @@ impl SizedPalette {
             .map(|p| Mapping {
                 source: p.matching,
                 ink: palette.entries()[p.index].rgb,
+                delta_e: p.delta_e,
             })
             .collect())
     }
@@ -436,10 +459,12 @@ mod tests {
                         ConfigPick {
                             rgba: [210, 120, 40, 255],
                             ink: "Pantone 1595".into(),
+                            delta_e: 0.0,
                         },
                         ConfigPick {
                             rgba: [0, 0, 0, 0],
                             ink: "Pure White (non-palette)".into(),
+                            delta_e: 0.0,
                         },
                     ],
                 },
@@ -457,6 +482,44 @@ mod tests {
             PaletteEntry::new("Pantone 1595", Rgb8::new(209, 91, 5)),
         ])
         .unwrap()
+    }
+
+    #[test]
+    fn a_picks_delta_e_round_trips_and_is_written_only_when_set() {
+        let mut config = sample();
+        config.palette[0].picks[0].delta_e = 12.5;
+        let text = config.to_toml(&[]);
+        assert!(text.contains(
+            "  { rgba = [210, 120, 40, 255], ink = \"Pantone 1595\", delta_e = 12.5 },\n"
+        ));
+        // A pick without a radius keeps the old line (so existing configs don't change).
+        assert!(text.contains("  { rgba = [0, 0, 0, 0], ink = \"Pure White (non-palette)\" },\n"));
+        assert_eq!(PaletteConfig::parse(&text).unwrap(), config);
+        // It reaches the recolorer.
+        let mappings = config.palette[0].mappings(&palette(), Rgb8::WHITE).unwrap();
+        assert_eq!(
+            mappings.iter().map(|m| m.delta_e).collect::<Vec<_>>(),
+            [12.5, 0.0]
+        );
+    }
+
+    #[test]
+    fn a_picks_delta_e_must_be_from_0_to_100() {
+        for value in ["0", "100", "37.5"] {
+            let text = format!(
+                "[[palette]]\nsize = 1\npicks = [{{ rgba = [1, 2, 3, 255], ink = \"A\", delta_e = {value} }}]\n"
+            );
+            assert!(PaletteConfig::parse(&text).is_ok(), "{value}");
+        }
+        for value in ["-1", "100.5", "nan", "inf"] {
+            let text = format!(
+                "[[palette]]\nsize = 1\npicks = [{{ rgba = [1, 2, 3, 255], ink = \"A\", delta_e = {value} }}]\n"
+            );
+            assert!(
+                matches!(PaletteConfig::parse(&text), Err(ConfigError::PickDeltaE(_))),
+                "{value}"
+            );
+        }
     }
 
     #[test]
@@ -611,6 +674,7 @@ mod tests {
             picks: vec![ConfigPick {
                 rgba: [0, 0, 0, 255],
                 ink: "Nope".into(),
+                delta_e: 0.0,
             }],
         };
         assert_eq!(
