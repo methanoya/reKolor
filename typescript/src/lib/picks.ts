@@ -15,6 +15,13 @@ export interface PickEntry {
   ink: PaletteMatch;
   /** The nearest inks to choose from, nearest first (8). */
   alternatives: PaletteMatch[];
+  /**
+   * The pick's capture radius (CIEDE2000): colors within it of `matching` print with this pick's
+   * ink, before the nearest-ink rule. 0: only its exact color.
+   */
+  deltaE: number;
+  /** The slider's maximum: `SLIDER_MAX`, or 100 for a pick that came from a file above it. */
+  maxDeltaE: number;
   /** Where it was picked; absent for picks imported from a config. */
   at?: { x: number; y: number };
   /** The color seen on screen differed from the stored pixel (a warning). */
@@ -44,9 +51,16 @@ export const fromHex = (text: string): Rgb => {
 
 export const sameRgb = (a: Rgb, b: Rgb) => a.r === b.r && a.g === b.g && a.b === b.b;
 
-// The engine's view of the picks: each picked color (as composited) → its ink's color.
+// The engine's view of the picks: each picked color (as composited) → its ink's color, with the
+// pick's capture radius.
 export const mappings = (picks: PickEntry[]): Mapping[] =>
-  picks.map((p) => ({ source: p.matching, ink: p.ink.rgb }));
+  picks.map((p) => ({ source: p.matching, ink: p.ink.rgb, deltaE: p.deltaE }));
+
+/** The ΔE sliders' usual maximum (picks and unprinted colors). */
+export const SLIDER_MAX = 40;
+
+/** A ΔE slider's maximum for a value: `SLIDER_MAX`, or 100 for a value above it (from a file). */
+export const sliderMax = (deltaE: number) => (deltaE > SLIDER_MAX ? 100 : SLIDER_MAX);
 
 /** A color left unprinted: pixels within `deltaE` of it take no ink; the material shows. */
 export interface RangeEntry {
@@ -54,7 +68,7 @@ export interface RangeEntry {
   /** The clicked pixel, as stored (composited over the material in Rust on each recolor). */
   pixel: Rgba;
   deltaE: number;
-  /** The slider's maximum: 40, or 100 for an entry that came from a file above 40. */
+  /** The slider's maximum: `SLIDER_MAX`, or 100 for an entry that came from a file above it. */
   maxDeltaE: number;
   /** Where it was clicked (a square marker on the original); absent for the material's range. */
   at?: { x: number; y: number };

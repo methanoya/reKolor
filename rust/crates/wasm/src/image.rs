@@ -100,13 +100,15 @@ impl SourceImage {
     /// straight into an `ImageData`, pass `new Uint8Array(imageData.data.buffer)`.
     ///
     /// Each pixel is composited over `request.material` and takes the nearest ink (an exact source
-    /// match takes its own ink; ties go to the earlier mapping), fully opaque. With **no mappings**
+    /// match takes its own ink; ties go to the earlier mapping), fully opaque. A pixel within a
+    /// mapping's `deltaE` (its capture radius) of its source takes that mapping's ink instead (the
+    /// nearest such source wins; ties: the earlier mapping). With **no mappings**
     /// the output is the composited copy (the image as it looks on the material); with **one
     /// mapping** every pixel takes that ink. ΔE is bit-identical to a native build, so ties
     /// resolve the same way. A pixel within a `materialRanges` entry (checked first) takes no ink
     /// and is **transparent** (`0, 0, 0, 0`), so the material shows through.
     /// At most 256 mappings (the palette-config limit), since the work grows with each one; the
-    /// same for ranges.
+    /// same for ranges. Every `deltaE` (mapping or range) is from 0 to 100 (`invalidInput`).
     pub fn recolor(&self, request: Ts<RecolorRequest>, out: &mut [u8]) -> RecolorOutcome {
         let outcome = request
             .to_rust()
@@ -123,6 +125,19 @@ impl SourceImage {
                     });
                 }
                 let ranges = core_ranges(&request.material_ranges)?;
+                if let Some(m) = request
+                    .mappings
+                    .iter()
+                    .find(|m| !(0.0..=100.0).contains(&m.delta_e))
+                {
+                    return Err(ErrorInfo {
+                        kind: crate::ErrorKind::InvalidInput,
+                        message: format!(
+                            "a mapping's deltaE must be from 0 to 100, got {}",
+                            m.delta_e
+                        ),
+                    });
+                }
                 let mappings: Vec<core::Mapping> =
                     request.mappings.into_iter().map(Into::into).collect();
                 Ok(crate::RecolorStats::from(core::recolor_with_ranges(

@@ -1,6 +1,6 @@
 <script lang="ts">
-  // The list of picks below the images: each picked color, the ink it prints with (changeable), a
-  // warning if any, and a remove button.
+  // The list of picks below the images: each picked color, the ink it prints with (changeable), its
+  // capture radius (a ΔE slider), a warning if any, and a remove button.
   //
   // How a Svelte component works: this script block runs once per instance of the component; the
   // markup after it is a template that Svelte keeps in sync with the variables it reads; the style
@@ -20,11 +20,13 @@
     unprinted?: number[];
     onink: (id: number, index: number) => void;
     onremove: (id: number) => void;
+    /** A pick's ΔE slider moved (its capture radius). */
+    ondelta: (id: number, deltaE: number) => void;
   }
 
   // `$props()` is a Svelte "rune" (a compiler instruction, recognizable by the `$`): it receives
   // the props, and the template updates whenever the parent passes new values.
-  let { picks, material, unprinted = [], onink, onremove }: Props = $props();
+  let { picks, material, unprinted = [], onink, onremove, ondelta }: Props = $props();
 
   // `$derived(expression)` is recomputed automatically whenever a value it reads (`material`)
   // changes.
@@ -38,7 +40,7 @@
 {#if picks.length === 0}
   <p class="hint">
     Click a color in the original to pick it. Each pick gets the nearest ink; change it from the
-    list.
+    list, and widen a pick's ΔE to let it take the colors around it too.
   </p>
 {:else}
   <ol class="picks" aria-label="Picked colors">
@@ -82,6 +84,24 @@
                 >
               {/each}
             </select>
+          </label>
+          <!-- The capture radius: colors within this ΔE of the pick's color print with its ink
+               (0: only its exact color). -->
+          <label
+            class="pick-delta"
+            title="Colors within this ΔE of the picked color print with its ink (0: only that color)"
+          >
+            ΔE
+            <span class="visually-hidden">capture radius for {label}</span>
+            <input
+              type="range"
+              min="0"
+              max={pick.maxDeltaE}
+              step="1"
+              value={pick.deltaE}
+              oninput={(e) => ondelta(pick.id, Number(e.currentTarget.value))}
+            />
+            <output>{pick.deltaE}</output>
           </label>
           {#if pick.mismatch}
             <span class="warning" role="note">
@@ -218,6 +238,23 @@
       white-space: nowrap;
       text-overflow: ellipsis;
     }
+  }
+  .pick-delta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  .pick-delta input {
+    flex: 1;
+    min-width: 0;
+  }
+  .pick-delta output {
+    min-width: 2ch;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg);
   }
   .warning {
     font-size: 0.8rem;

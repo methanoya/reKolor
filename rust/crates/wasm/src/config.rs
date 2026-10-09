@@ -13,15 +13,20 @@ use wasm_bindgen::prelude::*;
 use crate::outcome::outcome_js;
 use crate::{ErrorInfo, ErrorKind, Outcome, Palette, PaletteMatch, Rgb, Rgba};
 
-/// One pick in a config: the stored pixel color and its ink's name.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+// `#[tsify(optional)]` + `#[serde(default)]`: `deltaE` may be left out (it is then 0).
+/// One pick in a config: the stored pixel color, its ink's name, and its capture radius.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Tsify)]
 pub struct ConfigPick {
     pub rgba: Rgba,
     pub ink: String,
+    /// The pick's capture radius (CIEDE2000, 0 to 100); 0 or absent: only an exact match.
+    #[tsify(optional)]
+    #[serde(default, rename = "deltaE")]
+    pub delta_e: f32,
 }
 
 /// One `[[palette]]` section.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Tsify)]
 pub struct ConfigSection {
     /// The requested number of distinct inks.
     pub size: u32,
@@ -63,6 +68,9 @@ pub struct ResolvedPick {
     pub matching: Rgb,
     /// The named ink, with its distance from `matching`.
     pub ink: PaletteMatch,
+    /// The pick's capture radius from the config (0 when it has none).
+    #[serde(rename = "deltaE")]
+    pub delta_e: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Tsify)]
@@ -118,6 +126,7 @@ impl From<&config::ConfigPick> for ConfigPick {
         Self {
             rgba: core::Rgba8::from(p.rgba).into(),
             ink: p.ink.clone(),
+            delta_e: p.delta_e,
         }
     }
 }
@@ -152,6 +161,7 @@ impl From<ConfigPick> for config::ConfigPick {
         Self {
             rgba: [r, g, b, a],
             ink: p.ink,
+            delta_e: p.delta_e,
         }
     }
 }
@@ -238,6 +248,7 @@ impl Palette {
                         entry,
                         delta_e: core::delta_e_2000(p.matching, entry.rgb),
                     }),
+                    delta_e: p.delta_e,
                 }
             })
             .collect();

@@ -18,6 +18,7 @@
   import { SvelteMap } from 'svelte/reactivity';
   import BuiltWith from './components/BuiltWith.svelte';
   import ImageView from './components/ImageView.svelte';
+  import LogRocketLink from './components/LogRocketLink.svelte';
   import PickList from './components/PickList.svelte';
   import { EngineClient } from './lib/client';
   import { ALTERNATIVES } from './lib/engine';
@@ -25,9 +26,11 @@
   import { Mover, type Marker } from './lib/moves';
   import { LIMITS } from './lib/limits';
   import { imageFormat, reportError, track } from './lib/logrocket';
+  import { forgetClosedTabs, loadImage, loadState, saveImage, saveState } from './lib/persist';
   import type { AppErrorKind, AppOutcome } from './lib/outcome';
   import {
     BLACK,
+    SLIDER_MAX,
     WHITE,
     css,
     cssAlpha,
@@ -35,6 +38,7 @@
     hex,
     mappings,
     sameRgb,
+    sliderMax,
     type PickEntry,
     type PickMove,
     type RangeEntry,
@@ -68,19 +72,149 @@
     void start();
   });
 
+  // ── Ink palette: the built-in Pantone one, or one the user uploads ───────────────────────────────
+  /** The palette the picks choose their inks from. */
+  interface PaletteInfo {
+    /** "Pantone", or the uploaded file's name without `.json`. */
+    name: string;
+    /** Its number of inks. */
+    size: number;
+    /** Uploaded (not the built-in Pantone palette). */
+    custom: boolean;
+  }
+  let palette = $state<PaletteInfo>({ name: 'Pantone', size: 0, custom: false });
+  /**
+   * An uploaded palette's name and text: a restarted worker starts with Pantone again, so `start`
+   * hands it this one again.
+   */
+  let customPalette: { name: string; text: string } | undefined;
+
   async function start() {
     ready = false;
     const outcome = await client.call((api) => api.ready());
-    if (outcome.status === 'ok') {
-      ready = true;
-      status = `Engine ready · ${outcome.value.paletteSize} inks`;
-    } else {
+    if (outcome.status === 'error') {
       status = 'The engine could not start.';
       showError(outcome.error.kind, outcome.error.message);
+      return;
     }
+    palette = { name: 'Pantone', size: outcome.value.paletteSize, custom: false };
+    if (customPalette) {
+      const custom = customPalette;
+      const set = await client.call((api) => api.setPalette(custom.text));
+      if (set.status === 'ok')
+        palette = { name: custom.name, size: set.value.paletteSize, custom: true };
+      else customPalette = undefined;
+    }
+    ready = true;
+    status = `Engine ready · ${palette.name}, ${palette.size} inks`;
   }
   // `void` starts the async function without waiting for it (and tells the linter that's intended).
-  void start();
+  // After the first start (not after a worker restart), the tab's saved work comes back.
+  void start().then(async () => {
+    if (ready) await restore();
+    else restored = true;
+  });
+
+  // ── This tab's work, kept across reloads (`lib/persist.ts`) ──────────────────────────────────────
+  // The picks, the material, the unprinted colors and an uploaded palette in `sessionStorage`, the
+  // image in IndexedDB; all in this browser only.
+
+  /** Set once `restore` is done: only then is the state saved, so a fresh start can't overwrite it. */
+  let restored = $state(false);
+  /**
+   * The saved image couldn't be brought back (missing, a different file, or unreadable): the saved
+   * session is left as it is until the next change, so a reload can try again.
+   */
+  let keepSaved = false;
+  /**
+   * The image whose bytes are in IndexedDB, and the generation it was open as: the saved state
+   * names an image only once it is stored, so a reload never pairs picks with another image.
+   */
+  let storedImage = $state.raw<{ name: string; size: number; generation: number } | undefined>();
+
+  /**
+   * Brings back the saved work: the palette, the material, then the image (opened as usual) and,
+   * once it is open, the picks and unprinted colors exactly as they were.
+   */
+  async function restore() {
+    // An image the user opens meanwhile wins over the saved one (`requested` counts opens).
+    const opensBefore = requested;
+    try {
+      const saved = loadState();
+      if (!saved) return;
+      if (saved.palette) {
+        const custom = saved.palette;
+        const set = await client.call((api) => api.setPalette(custom.text));
+        if (set.status === 'ok') {
+          customPalette = custom;
+          palette = { name: custom.name, size: set.value.paletteSize, custom: true };
+        }
+      }
+      material = saved.material;
+      materialChosen = saved.materialChosen;
+      materialInput = hex(saved.material);
+      // Without its image, only the material's own unprinted entry applies.
+      ranges = saved.ranges.filter((r) => r.material);
+      // The image only if it is the one the state was saved with.
+      const savedImage = saved.image;
+      if (!savedImage) return;
+      const imageFile = await loadImage();
+      if (requested !== opensBefore) return;
+      // Missing, or not the file the state was saved with: keep the saved session for a retry.
+      if (!imageFile || imageFile.name !== savedImage.name || imageFile.size !== savedImage.size) {
+        keepSaved = true;
+        return;
+      }
+      if (!(await openFile(imageFile, true))) {
+        // Unreadable: keep the saved session too, unless the user opened another image meanwhile
+        // (their work replaces it).
+        keepSaved = requested === opensBefore + 1;
+        return;
+      }
+      const restoredGeneration = generation;
+      // Queued like an import, so a change made meanwhile isn't mixed into it; and only if the
+      // restored image is still the open one.
+      await mutations.run(() => {
+        if (generation !== restoredGeneration) return;
+        storedImage = { name: imageFile.name, size: imageFile.size, generation };
+        ranges = saved.ranges;
+        picks = saved.picks;
+        // New picks and entries get IDs after the restored ones.
+        nextPickId = Math.max(nextPickId, ...saved.picks.map((p) => p.id + 1));
+        nextRangeId = Math.max(nextRangeId, ...saved.ranges.map((r) => r.id + 1));
+        requestRecolor();
+        const count = saved.picks.length;
+        status = `Restored ${imageFile.name}${count ? ` with ${count} pick${count === 1 ? '' : 's'}` : ''}.`;
+      });
+    } finally {
+      restored = true;
+      void forgetClosedTabs();
+    }
+  }
+
+  // Saves the work whenever it changes (after `restore`): an `$effect` runs again whenever a value
+  // it reads changes. `$state.snapshot` makes plain copies of the picks and entries.
+  $effect(() => {
+    if (!restored) return;
+    // The image only when the open one is stored (see `storedImage`).
+    const image = file && storedImage?.generation === generation ? storedImage : undefined;
+    const state = {
+      version: 1 as const,
+      ...(image ? { image: { name: image.name, size: image.size } } : {}),
+      ...(palette.custom && customPalette ? { palette: customPalette } : {}),
+      material,
+      materialChosen,
+      picks: $state.snapshot(picks),
+      ranges: $state.snapshot(ranges),
+    };
+    // After a restore that couldn't bring the image back, the first run (right after `restore`)
+    // leaves the saved session alone; the next change saves.
+    if (keepSaved) {
+      keepSaved = false;
+      return;
+    }
+    saveState(state);
+  });
 
   // ── Image state ──────────────────────────────────────────────────────────────────────────────
   /** Incremented per open attempt (the worker requires each to be newer than the last). */
@@ -136,8 +270,6 @@
   let materialChosen = $state(false);
   /** The ΔE a new material range starts with. */
   const RANGE_DELTA_E = 10;
-  /** The ΔE slider's usual maximum; files may hold up to 100. */
-  const RANGE_SLIDER_MAX = 40;
 
   let view = $state<View>({ scale: 1, x: 0, y: 0 });
   let viewport: Size = { width: 0, height: 0 };
@@ -157,14 +289,19 @@
     colors = undefined;
     file = undefined;
     picks = [];
+    pickDeltaQueues.clear();
     ranges = ranges.filter((r) => r.material);
     addingRange = false;
     mover.reset();
     resultRevision = -1;
   }
 
-  async function openFile(f: File) {
-    if (!ready) return;
+  /**
+   * Opens an image file; `restoring` when it is the tab's saved image (not saved again, not
+   * reported as opened). Resolves to whether this open became the current image.
+   */
+  async function openFile(f: File, restoring = false): Promise<boolean> {
+    if (!ready) return false;
     const gen = ++requested;
     opening = true;
     error = undefined;
@@ -174,7 +311,7 @@
     if (gen !== requested) {
       // A newer open was started meanwhile (or the worker restarted); it owns `opening`.
       if (opened.status === 'ok') opened.value.bitmap.close();
-      return;
+      return false;
     }
     opening = false;
     if (opened.status === 'error') {
@@ -182,7 +319,7 @@
         showError(opened.error.kind, `${f.name}: ${opened.error.message}`);
         status = image ? 'Kept the previous image.' : 'Open an image to start.';
       }
-      return;
+      return false;
     }
     generation = gen;
     original?.close();
@@ -192,8 +329,17 @@
     resultRevision = -1;
     image = { width: opened.value.width, height: opened.value.height };
     file = { name: f.name, size: f.size };
+    // Kept for a reload of this tab (in this browser only). Once stored, and if still open, the
+    // saved state may name it (`storedImage`).
+    if (!restoring) {
+      void saveImage(f).then((stored) => {
+        if (stored && gen === generation)
+          storedImage = { name: f.name, size: f.size, generation: gen };
+      });
+    }
     colors = undefined;
     picks = [];
+    pickDeltaQueues.clear();
     ranges = ranges.filter((r) => r.material);
     addingRange = false;
     mover.reset();
@@ -206,7 +352,7 @@
     // counted starts another count, but this one is still this image's), unless another image was
     // opened meanwhile. `colors` is left out only if counting failed. The format is a name from a
     // fixed list (`imageFormat`), never part of the file's name.
-    if (gen === generation) {
+    if (gen === generation && !restoring) {
       track('Image opened', {
         format: imageFormat(f),
         width: opened.value.width,
@@ -214,6 +360,7 @@
         ...(counted === undefined ? {} : { colors: counted }),
       });
     }
+    return gen === generation;
   }
 
   /**
@@ -274,6 +421,9 @@
           matching,
           ink: suggestion,
           alternatives,
+          // A new pick starts with only its exact color (its slider widens it).
+          deltaE: 0,
+          maxDeltaE: SLIDER_MAX,
           at: { x, y },
           ...(mismatch ? { mismatch } : {}),
         },
@@ -354,6 +504,9 @@
             matching,
             ink,
             alternatives,
+            // Moving a pick keeps its capture radius.
+            deltaE: p.deltaE,
+            maxDeltaE: p.maxDeltaE,
             at: { x: move.x, y: move.y },
             ...(mismatch ? { mismatch } : {}),
           }
@@ -452,7 +605,7 @@
         id: nextRangeId++,
         pixel,
         deltaE: RANGE_DELTA_E,
-        maxDeltaE: RANGE_SLIDER_MAX,
+        maxDeltaE: SLIDER_MAX,
         material: true,
       },
       ...ranges,
@@ -516,7 +669,7 @@
           id: nextRangeId++,
           pixel,
           deltaE: RANGE_DELTA_E,
-          maxDeltaE: RANGE_SLIDER_MAX,
+          maxDeltaE: SLIDER_MAX,
           at: { x, y },
         },
       ];
@@ -567,9 +720,28 @@
       );
     });
 
+  // A pick's capture radius, from its slider: like an unprinted color's, one coalesced change per
+  // burst of slider input, queued with the other pick-list changes.
+  const pickDeltaQueues = new SvelteMap<number, (deltaE: number) => void>();
+
+  function setPickDeltaE(id: number, deltaE: number) {
+    let push = pickDeltaQueues.get(id);
+    if (!push) {
+      const gen = generation;
+      push = mutations.coalescing<number>((value) => {
+        if (gen !== generation) return;
+        picks = picks.map((p) => (p.id === id ? { ...p, deltaE: value } : p));
+        requestRecolor();
+      });
+      pickDeltaQueues.set(id, push);
+    }
+    push(deltaE);
+  }
+
   const removePick = (id: number) =>
     mutate(() => {
       picks = picks.filter((p) => p.id !== id);
+      pickDeltaQueues.delete(id);
       track('Pick removed', { picks: picks.length });
     });
 
@@ -577,6 +749,7 @@
     mutate(() => {
       track('Picks cleared', { removed: picks.length });
       picks = [];
+      pickDeltaQueues.clear();
     });
 
   // ── Palette configs: import replaces the picks only after everything validated ─────────────────
@@ -668,28 +841,30 @@
       showError(resolved.error.kind, `${name}: ${resolved.error.message}`);
       return;
     }
+    pickDeltaQueues.clear();
     picks = resolved.value.map((p) => ({
       id: nextPickId++,
       pixel: p.pixel,
       matching: p.matching,
       ink: p.ink,
       alternatives: p.alternatives,
+      deltaE: p.deltaE,
+      maxDeltaE: sliderMax(p.deltaE),
     }));
     const materialChanged = !sameRgb(fileMaterial, material);
     material = fileMaterial;
     // Imported entries have no square: like imported picks, they weren't clicked.
-    // A value above the slider's usual range widens that entry's slider.
-    const maxDeltaE = (deltaE: number) => (deltaE > RANGE_SLIDER_MAX ? 100 : RANGE_SLIDER_MAX);
+    // A value above the slider's usual range widens that entry's slider (`sliderMax`).
     ranges = unprinted.map((u) =>
       u.kind === 'material'
         ? {
             id: nextRangeId++,
             pixel: { ...fileMaterial, a: 255 },
             deltaE: u.deltaE,
-            maxDeltaE: maxDeltaE(u.deltaE),
+            maxDeltaE: sliderMax(u.deltaE),
             material: true,
           }
-        : { id: nextRangeId++, pixel: u.rgba, deltaE: u.deltaE, maxDeltaE: maxDeltaE(u.deltaE) },
+        : { id: nextRangeId++, pixel: u.rgba, deltaE: u.deltaE, maxDeltaE: sliderMax(u.deltaE) },
     );
     // The file decides, "none" included; a white material can't tell a choice from the default
     // unless its own color is listed.
@@ -719,7 +894,7 @@
       api.exportConfig(
         name,
         on,
-        picks.map((p) => ({ rgba: $state.snapshot(p.pixel), ink: p.ink.name })),
+        picks.map((p) => ({ rgba: $state.snapshot(p.pixel), ink: p.ink.name, deltaE: p.deltaE })),
         ranges.map((r): ConfigUnprinted =>
           r.material
             ? { kind: 'material', deltaE: r.deltaE }
@@ -733,6 +908,107 @@
     }
     save(new Blob([exported.value], { type: 'application/toml' }), `${stem(name)}.palettes.toml`);
     track('Picks exported', { picks: picks.length, unprinted: ranges.length });
+  }
+
+  // ── Switching the ink palette (the links on the Picks line) ─────────────────────────────────────
+  let paletteInput: HTMLInputElement;
+
+  // An uploaded palette: a `*.json` file in the `palettes/pantone.json` format
+  // (`palettes/palette.schema.json`). Queued like a pick, since it changes every pick's ink.
+  function onpalettechosen(e: Event & { currentTarget: HTMLInputElement }) {
+    const f = e.currentTarget.files?.[0];
+    e.currentTarget.value = '';
+    if (!f) return;
+    if (f.size > LIMITS.paletteBytes) {
+      showError(
+        'invalidPalette',
+        `${f.name}: the palette is larger than ${LIMITS.paletteBytes / 1024 / 1024} MB.`,
+      );
+      return;
+    }
+    void mutations.run(async () => {
+      const text = await f.text();
+      if (await applyPalette(text, stem(f.name), f.name)) {
+        track('Palette uploaded', { inks: palette.size });
+      }
+    });
+  }
+
+  /** Back to the built-in Pantone palette. */
+  function usePantone() {
+    void mutations.run(async () => {
+      if (await applyPalette(null, 'Pantone')) track('Palette reset');
+    });
+  }
+
+  /**
+   * Switches the engine to the palette `text` (`null`: Pantone), then gives every pick the nearest
+   * ink of the new palette, as for a new click (its ΔE and the rest stay). Runs inside `mutations`.
+   * Returns whether the palette changed; on error it says why and the old palette stays.
+   */
+  async function applyPalette(text: string | null, name: string, fileName?: string) {
+    const gen = generation;
+    const previous = customPalette?.text ?? null;
+    const set = await client.call((api) => api.setPalette(text));
+    if (set.status === 'error') {
+      if (set.error.kind !== 'superseded') {
+        showError(
+          set.error.kind,
+          fileName ? `${fileName}: ${set.error.message}` : set.error.message,
+        );
+      }
+      return false;
+    }
+    // The worker has the new palette. The picks get its inks before anything shown or saved
+    // changes, so the palette and the picks' inks always belong together.
+    const reinked = await reink(picks);
+    if (!reinked) {
+      // Couldn't re-ink (the error is shown): the worker goes back to the palette the page shows.
+      await client.call((api) => api.setPalette(previous));
+      return false;
+    }
+    // One step, with nothing awaited in between: the palette, its text and the picks. (Inside
+    // `mutations`, only opening an image changes the picks meanwhile, to none: nothing to re-ink.)
+    customPalette = text === null ? undefined : { name, text };
+    palette = { name, size: set.value.paletteSize, custom: text !== null };
+    if (gen === generation) picks = reinked;
+    requestRecolor();
+    status = `Palette ${name}: ${palette.size} inks${picks.length ? '; every pick has its nearest ink again' : ''}.`;
+    return true;
+  }
+
+  /** Each pick with the current palette's nearest ink (its suggestion) and alternatives. */
+  async function reink(list: PickEntry[]): Promise<PickEntry[] | undefined> {
+    if (list.length === 0) return [];
+    // Svelte state is wrapped in proxies, which can't be sent to the worker; send a plain copy.
+    const colors = $state.snapshot(list).map((p) => p.matching);
+    const outcome = await client.call((api) => api.nearestEach(colors, ALTERNATIVES));
+    if (outcome.status === 'error') {
+      if (outcome.error.kind !== 'superseded') showError(outcome.error.kind, outcome.error.message);
+      return undefined;
+    }
+    return list.map((p, i) => {
+      const alternatives = outcome.value[i];
+      const ink = alternatives?.[0];
+      return alternatives && ink ? { ...p, ink, alternatives } : p;
+    });
+  }
+
+  /**
+   * Saves the current palette as a `*.json` file (`pantone.json` for the built-in one). Queued, so
+   * it waits for a palette switch in progress and saves the palette the page shows.
+   */
+  function downloadPalette() {
+    void mutations.run(async () => {
+      const text = await client.call((api) => api.paletteText());
+      if (text.status === 'error') {
+        if (text.error.kind !== 'superseded') showError(text.error.kind, text.error.message);
+        return;
+      }
+      const name = palette.custom ? `${palette.name}.json` : 'pantone.json';
+      save(new Blob([text.value], { type: 'application/json' }), name);
+      track('Palette downloaded', { custom: palette.custom, inks: palette.size });
+    });
   }
 
   // ── Live recolor: one in flight, one pending; stale results dropped ────────────────────────────
@@ -945,9 +1221,9 @@
   </h1>
   <p class="tagline">Preview a picture printed with a limited ink palette.</p>
   <BuiltWith />
-  <!-- What the published site records, and why: a separate page (`public/privacy.html`), in a new
-       tab so the open image isn't lost. -->
-  <a class="privacy" href={privacyUrl} target="_blank" rel="noopener noreferrer">Privacy</a>
+  <!-- The LogRocket logo, linking to what the published site records, and why (a separate page,
+     `public/privacy.html`). -->
+  <LogRocketLink href={privacyUrl} />
 </header>
 
 <!-- `class:dragging` adds the `dragging` class while the `dragging` variable is true (the
@@ -1084,6 +1360,37 @@
         {#if picks.length > 0}
           <button type="button" class="link" onclick={clearPicks}>Clear all</button>
         {/if}
+        <!-- The ink palette the picks choose from: Pantone, or an uploaded `*.json`
+             (`palettes/palette.schema.json`). Its name and size are in the download link's tooltip;
+             the name may be a file's name, so that link is private. -->
+        <span class="palette">
+          <button
+            type="button"
+            class="link"
+            onclick={downloadPalette}
+            disabled={!ready}
+            title="Save the palette ({palette.name}, {palette.size} inks) as JSON"
+            data-private>Download palette</button
+          >
+          <input
+            bind:this={paletteInput}
+            type="file"
+            data-private
+            accept=".json,application/json"
+            class="visually-hidden"
+            tabindex="-1"
+            aria-hidden="true"
+            onchange={onpalettechosen}
+          />
+          <button type="button" class="link" onclick={() => paletteInput.click()} disabled={!ready}
+            >Upload palette…</button
+          >
+          {#if palette.custom}
+            <button type="button" class="link" onclick={usePantone} disabled={!ready}
+              >Use Pantone</button
+            >
+          {/if}
+        </span>
       </div>
       <!-- The pick list (`components/PickList.svelte`): it shows the picks and reports changes
            through `onink` and `onremove`. -->
@@ -1093,6 +1400,7 @@
         unprinted={unprintedPicks}
         onink={changeInk}
         onremove={removePick}
+        ondelta={setPickDeltaE}
       />
     </section>
 
@@ -1201,9 +1509,6 @@
   }
   .tagline {
     margin: 0;
-    color: var(--muted);
-  }
-  .privacy {
     color: var(--muted);
   }
   main {
@@ -1424,6 +1729,14 @@
   }
   .picks-header {
     flex-wrap: wrap;
+  }
+  /* The palette group sits at the right end of the Picks line (`auto` takes the free space). */
+  .palette {
+    margin-left: auto;
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.75rem;
   }
   dialog {
     border: 1px solid var(--border);

@@ -118,6 +118,7 @@ fn request(set: &str) -> Ts<RecolorRequest> {
         .map(|&(source, ink)| Mapping {
             source: rgb(source),
             ink: rgb(ink),
+            delta_e: 0.0,
         })
         .collect();
     Ts::from_rust(&RecolorRequest {
@@ -441,12 +442,92 @@ fn zero_and_one_mapping_follow_the_contract() {
         mappings: vec![Mapping {
             source: rgb([230, 76, 60]),
             ink: rgb([40, 120, 200]),
+            delta_e: 0.0,
         }],
     })
     .unwrap();
     let stats: RecolorStats = ok(read(image.recolor(one, &mut out)));
     assert_eq!(out, [40, 120, 200, 255, 40, 120, 200, 255]);
     assert_eq!((stats.exact, stats.nearest), (1.0, 1.0));
+}
+
+#[wasm_bindgen_test]
+fn a_mappings_delta_e_captures_nearby_colors_and_is_checked() {
+    // Red, and a red close to it (ΔE under 5); the second mapping's ink is almost that near red.
+    let image = SourceImage::from_rgba(vec![230, 76, 60, 255, 226, 82, 66, 255], 2, 1).unwrap();
+    let request = |delta_e| {
+        Ts::from_rust(&RecolorRequest {
+            material_ranges: vec![],
+            material: WHITE,
+            mappings: vec![
+                Mapping {
+                    source: rgb([230, 76, 60]),
+                    ink: rgb([0, 0, 0]),
+                    delta_e,
+                },
+                Mapping {
+                    source: rgb([40, 120, 200]),
+                    ink: rgb([227, 81, 65]),
+                    delta_e: 0.0,
+                },
+            ],
+        })
+        .unwrap()
+    };
+    let mut out = [0u8; 8];
+    // No radius: the near red takes the nearest ink.
+    let stats: RecolorStats = ok(read(image.recolor(request(0.0), &mut out)));
+    assert_eq!(out, [0, 0, 0, 255, 227, 81, 65, 255]);
+    assert_eq!(
+        (stats.exact, stats.captured, stats.nearest),
+        (1.0, 0.0, 1.0)
+    );
+    // A radius of 5 around red captures it.
+    let stats: RecolorStats = ok(read(image.recolor(request(5.0), &mut out)));
+    assert_eq!(out, [0, 0, 0, 255, 0, 0, 0, 255]);
+    assert_eq!(
+        (stats.exact, stats.captured, stats.nearest),
+        (1.0, 1.0, 0.0)
+    );
+
+    for bad in [-1.0, 100.5, f32::NAN] {
+        assert_eq!(
+            error_kind::<RecolorStats>(read(image.recolor(request(bad), &mut out))),
+            ErrorKind::InvalidInput,
+            "deltaE {bad}"
+        );
+    }
+}
+
+#[wasm_bindgen_test]
+fn configs_carry_each_picks_delta_e() {
+    let text = "[[palette]]\nsize = 2\npicks = [\n\
+                { rgba = [230, 76, 60, 255], ink = \"Pantone 179\", delta_e = 12.5 },\n\
+                { rgba = [40, 120, 200, 255], ink = \"Pantone 285\" },\n]\n";
+    let parsed: ParsedConfig = ok(read(parse_config(text)));
+    let radii = |picks: &[ConfigPick]| picks.iter().map(|p| p.delta_e).collect::<Vec<_>>();
+    assert_eq!(radii(&parsed.sections[0].picks), [12.5, 0.0]);
+    let resolved: ResolvedPicks = ok(read(
+        small_palette().resolve_section(Ts::from_rust(&parsed.sections[0]).unwrap(), white()),
+    ));
+    assert_eq!(
+        resolved.picks.iter().map(|p| p.delta_e).collect::<Vec<_>>(),
+        [12.5, 0.0]
+    );
+    // Exported back: written only where set.
+    let export = ConfigExport {
+        unprinted: vec![],
+        image_name: "x.png".into(),
+        material: WHITE,
+        picks: parsed.sections[0].picks.clone(),
+    };
+    let out: ConfigText = ok(read(serialize_config(Ts::from_rust(&export).unwrap())));
+    assert!(
+        out.text.contains("ink = \"Pantone 179\", delta_e = 12.5 }"),
+        "{}",
+        out.text
+    );
+    assert!(out.text.contains("ink = \"Pantone 285\" }"), "{}", out.text);
 }
 
 #[wasm_bindgen_test]
@@ -524,10 +605,12 @@ fn nearest_ink_ties_go_to_the_earlier_mapping() {
                 Mapping {
                     source: rgb([230, 76, 60]),
                     ink: first,
+                    delta_e: 0.0,
                 },
                 Mapping {
                     source: rgb([40, 120, 200]),
                     ink: second,
+                    delta_e: 0.0,
                 },
             ],
         })
@@ -625,6 +708,7 @@ fn resolved_picks_are_composited_in_rust() {
                     a: 0,
                 },
                 ink: "Pure White (non-palette)".into(),
+                delta_e: 0.0,
             },
             ConfigPick {
                 rgba: Rgba {
@@ -634,6 +718,7 @@ fn resolved_picks_are_composited_in_rust() {
                     a: 100,
                 },
                 ink: "Pantone 185".into(),
+                delta_e: 0.0,
             },
         ],
     };
@@ -678,6 +763,7 @@ fn bad_configs_are_invalid_config_errors() {
                 a: 255,
             },
             ink: "Pantone 99999".into(),
+            delta_e: 0.0,
         }],
     };
     assert_eq!(
@@ -701,6 +787,7 @@ fn color_count_matches_analyze_and_mappings_are_capped() {
     let mapping = |i: u32| Mapping {
         source: rgb([i as u8, (i >> 8) as u8, 1]),
         ink: rgb([0, 0, 0]),
+        delta_e: 0.0,
     };
     let allowed = Ts::from_rust(&RecolorRequest {
         material_ranges: vec![],

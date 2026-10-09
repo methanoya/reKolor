@@ -30,5 +30,5 @@
     "allowJs": true,
     "checkJs": true
   },
-  "include": ["src/**/*", "tests/**/*", "scripts/**/*", "*.ts", "*.js"]
+  "include": ["src/**/*", "tests/**/*", "scripts/**/*", "*.ts", "*.js", "../publish/*.ts"]
 }

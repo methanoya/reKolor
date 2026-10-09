@@ -23,7 +23,9 @@ export type AppErrorKind =
   /** No image is open. */
   | 'noImage'
   /** A palette config couldn't be read or doesn't fit the palette. */
-  | 'invalidConfig';
+  | 'invalidConfig'
+  /** An ink palette (`*.json`) couldn't be read or is too large. */
+  | 'invalidPalette';
 
 // An `interface` describes the shape of an object: which fields it has and their types.
 export interface AppError {

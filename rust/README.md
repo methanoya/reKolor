@@ -101,6 +101,8 @@ if (pick.status === 'ok' && pick.value.mismatch) console.warn('coordinate mappin
 
 const out = new ImageData(image.width, image.height);
 const result = image.recolor({ mappings, material }, new Uint8Array(out.data.buffer)); // writes into `out`
+// A mapping may reach further than its exact color: `deltaE` is its capture radius (0 if absent).
+image.recolor({ mappings: [{ source, ink, deltaE: 8 }], material }, new Uint8Array(out.data.buffer));
 // Colors left unprinted (optional): no ink, transparent in the output, so the material shows.
 const ranges = [{ pixel: { ...material, a: 255 }, deltaE: 10 }];  // the material's own color
 image.recolor({ mappings, material, materialRanges: ranges }, new Uint8Array(out.data.buffer));
@@ -113,7 +115,7 @@ image.free(); // or `using` / Symbol.dispose
 // Palette configs (*.palettes.toml, the golden-set format), read and written by `rekolor-config`:
 const parsed = parseConfig(tomlText);    // Outcome<{ material, unprinted, sections: [{ size, picks }] }>
 const picks = palette.value.resolveSection(section, parsed.value.material); // matching colors from Rust
-const text = serializeConfig({ imageName: 'tiger.png', material, picks: [{ rgba, ink: 'Pantone 1595' }],
+const text = serializeConfig({ imageName: 'tiger.png', material, picks: [{ rgba, ink: 'Pantone 1595', deltaE: 8 }],
   unprinted: [{ kind: 'material', deltaE: 10 }, { kind: 'color', rgba, deltaE: 12.5 }] });
 ```
 
@@ -121,8 +123,9 @@ The material is a required argument everywhere it is used (`pick`, `recolor`, `c
 `analyze`, `resolveSection`, `serializeConfig`): there is no hidden white default at the boundary.
 `SourceImage.colorCount(material)` is the bounded color count (2 MiB, whatever the image); `recolor`
 accepts at most 256 mappings (`tooManyMappings`) and 256 material ranges (`tooManyRanges`), the
-palette-config limits, and a range's `deltaE` from 0 to 100 (`invalidInput` otherwise);
-`unprintedColors` checks its ranges the same way.
+palette-config limits, and a mapping's or range's `deltaE` from 0 to 100 (`invalidInput`
+otherwise); `unprintedColors` checks its ranges the same way. `recolor`'s stats count `exact`,
+`captured` (within a mapping's `deltaE`) and `nearest` pixels.
 
 The WASM file is about 360 KB (150 KB gzipped); the TOML parser for `*.palettes.toml` is a large
 part of it.
@@ -156,7 +159,9 @@ rekolor golden update <dir>                 # <name>-out-<size>.png from each co
   config's are used). ΔE from 0 to 100.
 
 - `--palette <path>` on every command; by default `palettes/pantone.json` in the current directory
-  or the nearest parent that has it.
+  or the nearest parent that has it. The format (a JSON object of `"<ink name>": { "rgb": [r, g, b]
+  }`, in tie order) is described by `palettes/palette.schema.json` (JSON Schema 2020-12); the web
+  app downloads and uploads palettes in the same format.
 - Inputs: every format `rekolor-io` reads. Decoder warnings (ICC profile ignored, EXIF orientation
   applied, semi-transparent pixels) go to stderr; errors exit non-zero.
 - `log` traces go to stderr at `warn` level by default; set `RUST_LOG=debug` for more.
@@ -165,7 +170,9 @@ rekolor golden update <dir>                 # <name>-out-<size>.png from each co
 
 Every image in `../samples/**` has, next to it:
 
-- `<name>.palettes.toml`: picks for 3, 7 and 16 inks (`{ rgba = [r, g, b, a], ink = "<name>" }`).
+- `<name>.palettes.toml`: picks for 3, 7 and 16 inks (`{ rgba = [r, g, b, a], ink = "<name>" }`,
+  plus `delta_e = 8` for a pick with a capture radius, ΔE 0–100; written only when not 0, and
+  none of the golden configs has one).
   "Size N" means up to N distinct inks. A top-level `material = [r, g, b]` (before the first
   `[[palette]]`) is the material the picks are composited over; it is always written, and a file
   without it is read as white (the current golden configs have none). A top-level `unprinted` list
@@ -251,6 +258,12 @@ re-exported.
 - **Matching:** each pixel is composited over the material color (white by default) and takes the
   ink nearest to it by CIEDE2000; a pixel whose composited color equals a mapping's source takes that
   mapping's ink. The output is opaque, except for colors left unprinted.
+- **Capture radius:** a mapping's `delta_e` (0 to 100; 0 by default) is how far around its source it
+  reaches: a pixel within it (CIEDE2000, from the source) takes that mapping's ink before the
+  nearest-ink rule. The order for each pixel: unprinted ranges, an exact source match, the nearest
+  source among the radii that contain the pixel (ties: the earlier mapping), the nearest ink.
+  `RecolorStats::captured` counts those pixels. With every radius at 0 nothing changes, so the
+  baseline and golden outputs stay the same.
 - **Material color:** per channel `(a·c + (255 − a)·m) / 255`, truncating, on the stored sRGB
   values. `pick`, `recolor`, `analyze`/`color_count`, config resolving and the generator take the
   material.

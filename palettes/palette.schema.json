@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/methanoya/reKolor/main/palettes/palette.schema.json",
+  "title": "reKolor ink palette",
+  "description": "The inks an image can be printed with, as a JSON object: each key is an ink's name and each value its color. Key order matters: when two inks are equally near a color, the earlier one wins. A name containing \"non-palette\" (such as \"Pure White (non-palette)\") marks a color that isn't a real ink. Used by the web app (Download palette / Upload palette…) and the CLI (--palette); palettes/pantone.json is the built-in palette.",
+  "type": "object",
+  "minProperties": 1,
+  "propertyNames": {
+    "description": "The ink's name, as configs (*.palettes.toml) refer to it.",
+    "type": "string",
+    "minLength": 1
+  },
+  "additionalProperties": {
+    "description": "One ink. Keys other than rgb are allowed and ignored.",
+    "type": "object",
+    "required": ["rgb"],
+    "properties": {
+      "rgb": {
+        "description": "The ink's color as 8-bit sRGB: red, green, blue.",
+        "type": "array",
+        "items": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "minItems": 3,
+        "maxItems": 3
+      }
+    }
+  },
+  "examples": [
+    {
+      "Pure White (non-palette)": { "rgb": [255, 255, 255] },
+      "Pantone 100": { "rgb": [244, 237, 124] },
+      "Pantone 1595": { "rgb": [209, 91, 5] }
+    }
+  ]
+}

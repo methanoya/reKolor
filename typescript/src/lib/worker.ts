@@ -22,8 +22,10 @@ import { err, ok, type AppOutcome } from './outcome';
 import { Session } from './session';
 
 // Module-level state: a worker is its own JavaScript environment, so these variables exist once
-// per worker and are gone when the worker is restarted.
+// per worker and are gone when the worker is restarted (with the built-in palette again).
 let session: Session | undefined;
+/** The current palette's text: the built-in Pantone palette, or one the user uploaded. */
+let paletteText: string = pantoneText;
 
 // Startup runs once, as soon as the worker loads: an async function that is called immediately
 // (`(async () => { ... })()`). Every API call waits for it first (`withSession`).
@@ -73,6 +75,20 @@ const api = {
   rematch: (picks: { pixel: Rgba; matching: Rgb }[], material: Rgb) =>
     withSession((s) => s.rematch(picks, material)),
   nearest: (color: Rgb, k?: number) => withSession((s) => s.nearest(color, k)),
+  nearestEach: (colors: Rgb[], k?: number) => withSession((s) => s.nearestEach(colors, k)),
+  /**
+   * Replaces the palette with `text` (`palettes/pantone.json` format), or with the built-in
+   * Pantone palette for `null`. Resolves to the new palette's number of inks.
+   */
+  setPalette: (text: string | null) =>
+    withSession((s) => {
+      const next = text ?? pantoneText;
+      const set = s.setPalette(next);
+      if (set.status === 'ok') paletteText = next;
+      return set.status === 'ok' ? ok({ paletteSize: set.value }) : set;
+    }),
+  /** The current palette's text, as uploaded (or `palettes/pantone.json`), for download. */
+  paletteText: () => withSession(() => ok(paletteText)),
   unprintedColors: (colors: Rgb[], material: Rgb, materialRanges: MaterialRange[]) =>
     withSession((s) => s.unprintedColors(colors, material, materialRanges)),
   recolor: async (

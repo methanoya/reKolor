@@ -4,13 +4,16 @@
 use crate::color::{Lab, delta_e_2000_lab, lab};
 use crate::{Error, ImageRef, Rgb8, Rgba8, composite};
 
-// A pick as the engine sees it: the color the user clicked (composited over the material) and the
-// color of the ink chosen for it.
+// A pick as the engine sees it: the color the user clicked (composited over the material), the
+// color of the ink chosen for it, and how far around that color the pick reaches.
 /// One picked color and the ink that replaces it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Mapping {
     pub source: Rgb8,
     pub ink: Rgb8,
+    /// The pick's capture radius (CIEDE2000, 0 to 100): pixels within it of `source` take this
+    /// ink before the nearest-ink rule applies. 0: only an exact match (see [`recolor`]).
+    pub delta_e: f32,
 }
 
 /// A color left unprinted: pixels whose composited color is within `delta_e`
@@ -29,6 +32,8 @@ pub struct MaterialRange {
 pub struct RecolorStats {
     /// Pixels whose composited color equals a mapping's source exactly.
     pub exact: u64,
+    /// Pixels within a mapping's capture radius (`delta_e`) of its source, but not equal to it.
+    pub captured: u64,
     /// Pixels left unprinted by a [`MaterialRange`] (transparent in the output).
     pub unprinted: u64,
     /// All other pixels.
@@ -42,9 +47,13 @@ pub struct RecolorStats {
 /// Contract ([`Rgb8::WHITE`] as the material composites over white):
 /// 1. each pixel is composited over `material` ([`composite`]); the output is opaque;
 /// 2. if the result equals a mapping's `source`, it takes that mapping's ink (first match wins);
-/// 3. otherwise it takes the **ink** nearest to it by CIEDE2000 (on a tie, the earlier mapping);
-/// 4. **no mappings**: the output is the composited copy (the image as it looks on the material);
-/// 5. **one mapping**: no special case, so every pixel takes that ink.
+/// 3. otherwise, if it is within one or more mappings' capture radius (`delta_e`, CIEDE2000, from
+///    `source`), it takes the ink of the mapping whose source is nearest (on a tie, the earlier);
+/// 4. otherwise it takes the **ink** nearest to it by CIEDE2000 (on a tie, the earlier mapping);
+/// 5. **no mappings**: the output is the composited copy (the image as it looks on the material);
+/// 6. **one mapping**: no special case, so every pixel takes that ink.
+///
+/// With every `delta_e` at 0, step 3 never applies.
 ///
 /// ΔE is bit-identical on native and WASM builds ([`delta_e_2000_lab`](crate::delta_e_2000_lab)),
 /// so ties resolve the same way everywhere.
@@ -77,11 +86,16 @@ pub fn recolor_with_ranges(
         });
     }
 
-    // Convert every ink and every range color to Lab once, up front: the loop below compares each
-    // pixel against them, and converting inside the loop would repeat that work millions of times.
-    // `(Mapping, Lab)` is a tuple, an unnamed pair of values.
+    // Convert every ink, every capture source and every range color to Lab once, up front: the
+    // loop below compares each pixel against them, and converting inside the loop would repeat
+    // that work millions of times. `(Mapping, Lab)` is a tuple, an unnamed pair of values.
     let inks: Vec<(Mapping, Lab)> = mappings.iter().map(|&m| (m, lab(m.ink))).collect();
+    let radii = radius_labs(mappings);
     let ranges = range_labs(ranges, material);
+    let table = Lookup {
+        inks: &inks,
+        radii: &radii,
+    };
     let pixel_count = input.len() / 4;
     // The memo (a cache of answers per color) only pays off for larger images; `.then(|| ...)`
     // builds it (`Some(table)`) only when the condition is true, and leaves `None` otherwise.
@@ -97,22 +111,22 @@ pub fn recolor_with_ranges(
         // whether the color is in an unprinted range). `None if ... =>` is an arm with an extra
         // condition.
         let decided = match memo.as_deref_mut() {
-            Some(memo) => memoized(memo, &inks, &ranges, color),
+            Some(memo) => memoized(memo, &table, &ranges, color),
             None if in_range(&ranges, color) => Decided::Unprinted,
             None => {
-                let (ink, exact) = lookup(&inks, color);
-                Decided::Ink { ink, exact }
+                let (ink, how) = table.ink(color);
+                Decided::Ink { ink, how }
             }
         };
         match decided {
-            Decided::Ink { ink, exact } => {
+            Decided::Ink { ink, how } => {
                 // `*dst = ...` writes through the mutable reference into the output buffer; 255 =
                 // fully opaque.
                 *dst = [ink.r, ink.g, ink.b, 255];
-                if exact {
-                    stats.exact += 1;
-                } else {
-                    stats.nearest += 1;
+                match how {
+                    How::Exact => stats.exact += 1,
+                    How::Captured => stats.captured += 1,
+                    How::Nearest => stats.nearest += 1,
                 }
             }
             Decided::Unprinted => {
@@ -123,13 +137,15 @@ pub fn recolor_with_ranges(
     }
     // Shown only when debug logging is on (e.g. `RUST_LOG=debug` for the CLI).
     log::debug!(
-        "recolor: {}×{} on {:?}, {} mappings, {} ranges, exact {}, unprinted {}, nearest {}",
+        "recolor: {}×{} on {:?}, {} mappings, {} ranges, exact {}, captured {}, unprinted {}, \
+         nearest {}",
         image.width(),
         image.height(),
         material,
         mappings.len(),
         ranges.len(),
         stats.exact,
+        stats.captured,
         stats.unprinted,
         stats.nearest
     );
@@ -140,21 +156,36 @@ pub fn recolor_with_ranges(
 /// Images above this many pixels remember each color's answer (below it, the 32 MiB table costs
 /// more than it saves).
 const MEMO_MIN_PIXELS: usize = 1 << 16;
-// A memo entry is one `u16`. Its low 15 bits are 0 (not computed yet), 0x7fff (`MEMO_UNPRINTED`: in
-// an unprinted range) or "mapping index + 1"; the top bit (`0x8000`) marks an exact match. So the
-// memo is used only with fewer than 0x7fff mappings, which keeps 0x7fff free for "unprinted".
-/// The memo stores `mapping index + 1` in 15 bits.
-const MEMO_MAX_INKS: usize = 0x7fff;
+// A memo entry is one `u16`. Its low 14 bits (`MEMO_INDEX`) are 0 (not computed yet), 0x3fff
+// (`MEMO_UNPRINTED`: in an unprinted range) or "mapping index + 1"; the top bit (`0x8000`) marks an
+// exact match and the next one (`0x4000`) a capture-radius match. So the memo is used only with
+// fewer than 0x3fff mappings (the WASM API and configs allow 256), which keeps 0x3fff free for
+// "unprinted".
+/// The memo stores `mapping index + 1` in 14 bits.
+const MEMO_MAX_INKS: usize = 0x3fff;
+const MEMO_INDEX: u16 = 0x3fff;
 const MEMO_EXACT: u16 = 0x8000;
-/// Unprinted: `0x7fff` is never `index + 1` (at most `MEMO_MAX_INKS - 1` mappings).
-const MEMO_UNPRINTED: u16 = 0x7fff;
+const MEMO_CAPTURED: u16 = 0x4000;
+/// Unprinted: `0x3fff` is never `index + 1` (at most `MEMO_MAX_INKS - 1` mappings).
+const MEMO_UNPRINTED: u16 = 0x3fff;
 
-// Private helper type (no `pub`): the per-pixel answer used inside this file.
+// Private helper types (no `pub`): the per-pixel answer used inside this file.
+/// How a composited color found its ink (for [`RecolorStats`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum How {
+    /// Equal to a mapping's source.
+    Exact,
+    /// Within a mapping's capture radius.
+    Captured,
+    /// The nearest ink (or, with no mappings, the composited color itself).
+    Nearest,
+}
+
 /// What a composited color becomes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Decided {
-    /// An ink (or, with no mappings, the composited color itself); `exact` for a source match.
-    Ink { ink: Rgb8, exact: bool },
+    /// An ink (or, with no mappings, the composited color itself), and how it was found.
+    Ink { ink: Rgb8, how: How },
     /// Within a material range: no ink.
     Unprinted,
 }
@@ -186,71 +217,114 @@ fn in_range(ranges: &[(Lab, f32)], color: Rgb8) -> bool {
         .any(|&(center, delta_e)| delta_e_2000_lab(color_lab, center) <= delta_e)
 }
 
-/// [`in_range`] and [`lookup`] remembered per composited color (one `u16` for each of the 2^24
-/// colors: 0 = not yet computed, [`MEMO_UNPRINTED`] = in a material range, else the mapping
-/// index + 1, with [`MEMO_EXACT`] for exact matches). The answer depends only on the color, so
-/// results are identical; images repeat colors, so most pixels skip the CIEDE2000 work. Memory is
-/// fixed (32 MiB) whatever the image.
-fn memoized(
-    memo: &mut [u16],
-    inks: &[(Mapping, Lab)],
-    ranges: &[(Lab, f32)],
-    color: Rgb8,
-) -> Decided {
+/// [`in_range`] and [`Lookup::index`] remembered per composited color (one `u16` for each of the
+/// 2^24 colors: 0 = not yet computed, [`MEMO_UNPRINTED`] = in a material range, else the mapping
+/// index + 1, with [`MEMO_EXACT`] or [`MEMO_CAPTURED`] for how it matched). The answer depends
+/// only on the color, so results are identical; images repeat colors, so most pixels skip the
+/// CIEDE2000 work. Memory is fixed (32 MiB) whatever the image.
+fn memoized(memo: &mut [u16], table: &Lookup<'_>, ranges: &[(Lab, f32)], color: Rgb8) -> Decided {
     // The color as one number 0..2^24, used as the index into the memo table.
     let key = (usize::from(color.r) << 16) | (usize::from(color.g) << 8) | usize::from(color.b);
     let entry = memo[key];
     if entry == MEMO_UNPRINTED {
         return Decided::Unprinted;
     }
-    // Already computed: decode the stored index (`entry & !MEMO_EXACT` clears the top bit).
+    // Already computed: decode the stored index (`entry & MEMO_INDEX` keeps the low 14 bits) and
+    // how it matched (the two top bits).
     if entry != 0 {
+        let how = if entry & MEMO_EXACT != 0 {
+            How::Exact
+        } else if entry & MEMO_CAPTURED != 0 {
+            How::Captured
+        } else {
+            How::Nearest
+        };
         return Decided::Ink {
-            ink: inks[usize::from(entry & !MEMO_EXACT) - 1].0.ink,
-            exact: entry & MEMO_EXACT != 0,
+            ink: table.inks[usize::from(entry & MEMO_INDEX) - 1].0.ink,
+            how,
         };
     }
     if in_range(ranges, color) {
         memo[key] = MEMO_UNPRINTED;
         return Decided::Unprinted;
     }
-    let (index, exact) = lookup_index(inks, color);
-    // `inks` is non-empty when the memo is used, so `lookup_index` always finds an index.
+    let (index, how) = table.index(color);
+    // `inks` is non-empty when the memo is used, so `index` always finds one.
     let index = index.expect("memo is only used with mappings");
-    memo[key] = (index as u16 + 1) | if exact { MEMO_EXACT } else { 0 };
+    let flag = match how {
+        How::Exact => MEMO_EXACT,
+        How::Captured => MEMO_CAPTURED,
+        How::Nearest => 0,
+    };
+    memo[key] = (index as u16 + 1) | flag;
     Decided::Ink {
-        ink: inks[index].0.ink,
-        exact,
+        ink: table.inks[index].0.ink,
+        how,
     }
 }
 
-// Returns a tuple: the ink color and whether it was an exact match.
-/// The ink for one composited pixel color, and whether it was an exact source match.
-fn lookup(inks: &[(Mapping, Lab)], color: Rgb8) -> (Rgb8, bool) {
-    match lookup_index(inks, color) {
-        (Some(index), exact) => (inks[index].0.ink, exact),
-        // No mappings: the composited pixel passes through.
-        (None, _) => (color, false),
-    }
+/// The mappings with a capture radius: each one's index, its source in Lab, and its radius. Only
+/// these are checked in step 3 of [`recolor`]; with no radius set, the list is empty and costs
+/// nothing.
+fn radius_labs(mappings: &[Mapping]) -> Vec<(usize, Lab, f32)> {
+    mappings
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| m.delta_e > 0.0)
+        .map(|(index, m)| (index, lab(m.source), m.delta_e))
+        .collect()
 }
 
-/// Which mapping a composited color takes: an exact source match first (first match wins), else
-/// the nearest ink (ties: the earlier mapping). `None` only when there are no mappings.
-fn lookup_index(inks: &[(Mapping, Lab)], color: Rgb8) -> (Option<usize>, bool) {
-    // `position` gives the index of the first mapping whose source is exactly this color, if any.
-    if let Some(index) = inks.iter().position(|(m, _)| m.source == color) {
-        return (Some(index), true);
-    }
-    // The pixel's Lab value is computed once instead of once per ink (same value each time).
-    let color_lab = lab(color);
-    let mut best: Option<(usize, f32)> = None;
-    for (index, &(_, ink_lab)) in inks.iter().enumerate() {
-        let distance = delta_e_2000_lab(color_lab, ink_lab);
-        if best.is_none_or(|(_, d)| d > distance) {
-            best = Some((index, distance));
+// `'a` is a lifetime: the struct borrows the two lists for as long as it exists.
+/// The mappings prepared for matching: every mapping with its ink in Lab, and the ones with a
+/// capture radius ([`radius_labs`]).
+struct Lookup<'a> {
+    inks: &'a [(Mapping, Lab)],
+    radii: &'a [(usize, Lab, f32)],
+}
+
+impl Lookup<'_> {
+    // Returns a tuple: the ink color and how it was found.
+    /// The ink for one composited pixel color, and how it was found.
+    fn ink(&self, color: Rgb8) -> (Rgb8, How) {
+        match self.index(color) {
+            (Some(index), how) => (self.inks[index].0.ink, how),
+            // No mappings: the composited pixel passes through.
+            (None, how) => (color, how),
         }
     }
-    (best.map(|(index, _)| index), false)
+
+    /// Which mapping a composited color takes: an exact source match first (first match wins),
+    /// then the nearest source among the mappings whose capture radius contains the color (ties:
+    /// the earlier mapping), else the nearest ink (ties: the earlier mapping). `None` only when
+    /// there are no mappings.
+    fn index(&self, color: Rgb8) -> (Option<usize>, How) {
+        // `position` gives the index of the first mapping whose source is exactly this color.
+        if let Some(index) = self.inks.iter().position(|(m, _)| m.source == color) {
+            return (Some(index), How::Exact);
+        }
+        // The pixel's Lab value is computed once instead of once per mapping (same value each
+        // time).
+        let color_lab = lab(color);
+        let mut captured: Option<(usize, f32)> = None;
+        for &(index, source_lab, delta_e) in self.radii {
+            let distance = delta_e_2000_lab(color_lab, source_lab);
+            if distance <= delta_e && captured.is_none_or(|(_, d)| d > distance) {
+                captured = Some((index, distance));
+            }
+        }
+        if let Some((index, _)) = captured {
+            return (Some(index), How::Captured);
+        }
+        let mut best: Option<(usize, f32)> = None;
+        for (index, &(_, ink_lab)) in self.inks.iter().enumerate() {
+            let distance = delta_e_2000_lab(color_lab, ink_lab);
+            if best.is_none_or(|(_, d)| d > distance) {
+                best = Some((index, distance));
+            }
+        }
+        (best.map(|(index, _)| index), How::Nearest)
+    }
 }
 
 #[cfg(test)]
@@ -290,6 +364,7 @@ mod tests {
         let mappings = [Mapping {
             source: RED,
             ink: BLUE,
+            delta_e: 0.0,
         }];
         let (out, stats) = run(&[230, 76, 60, 255], &mappings);
         assert_eq!(out, [40, 120, 200, 255]);
@@ -302,6 +377,7 @@ mod tests {
         let mappings = [Mapping {
             source: Rgb8::new(255, 255, 255),
             ink: Rgb8::new(1, 2, 3),
+            delta_e: 0.0,
         }];
         let (out, stats) = run(&[9, 9, 9, 0], &mappings);
         assert_eq!(out, [1, 2, 3, 255]);
@@ -315,10 +391,12 @@ mod tests {
             Mapping {
                 source: RED,
                 ink: Rgb8::new(0, 0, 0),
+                delta_e: 0.0,
             },
             Mapping {
                 source: BLUE,
                 ink: Rgb8::new(231, 77, 61),
+                delta_e: 0.0,
             },
         ];
         let (out, stats) = run(&[231, 76, 60, 255], &mappings);
@@ -344,10 +422,12 @@ mod tests {
             Mapping {
                 source: RED,
                 ink: a,
+                delta_e: 0.0,
             },
             Mapping {
                 source: BLUE,
                 ink: b,
+                delta_e: 0.0,
             },
         ];
         let first_b = [first_a[1], first_a[0]];
@@ -363,10 +443,12 @@ mod tests {
             Mapping {
                 source: RED,
                 ink: BLUE,
+                delta_e: 0.0,
             },
             Mapping {
                 source: RED,
                 ink: Rgb8::new(0, 0, 0),
+                delta_e: 0.0,
             },
         ];
         let (out, stats) = run(&[230, 76, 60, 255], &mappings);
@@ -401,35 +483,44 @@ mod tests {
             Mapping {
                 source: RED,
                 ink: BLUE,
+                delta_e: 0.0,
             },
             Mapping {
                 source: Rgb8::new(1, 2, 3),
                 ink: Rgb8::new(0, 2, 227),
+                delta_e: 0.0,
             },
             Mapping {
                 source: Rgb8::new(4, 5, 6),
                 ink: Rgb8::new(0, 4, 0),
+                delta_e: 0.0,
             },
             Mapping {
                 source: Rgb8::new(7, 8, 9),
                 ink: Rgb8::new(252, 181, 20),
+                delta_e: 0.0,
             },
         ];
         assert!((w * h) as usize > MEMO_MIN_PIXELS);
         let inks: Vec<(Mapping, Lab)> = mappings.iter().map(|&m| (m, lab(m.ink))).collect();
+        let radii = radius_labs(&mappings);
+        let table = Lookup {
+            inks: &inks,
+            radii: &radii,
+        };
         // On (7, 8, 9), transparent pixels are an exact source too.
         for material in [Rgb8::WHITE, Rgb8::new(7, 8, 9)] {
             let mut out = vec![0; rgba.len()];
             let stats = recolor(image, &mappings, material, &mut out).unwrap();
             let mut exact = 0;
             for (pixel, got) in image.pixels().zip(out.as_chunks::<4>().0) {
-                let (ink, is_exact) = lookup(&inks, composite(pixel, material));
+                let (ink, how) = table.ink(composite(pixel, material));
                 assert_eq!(
                     *got,
                     [ink.r, ink.g, ink.b, 255],
                     "pixel {pixel:?} on {material:?}"
                 );
-                exact += u64::from(is_exact);
+                exact += u64::from(how == How::Exact);
             }
             assert_eq!(stats.exact, exact);
             assert_eq!(stats.exact + stats.nearest, u64::from(w * h));
@@ -441,6 +532,7 @@ mod tests {
         let mappings = [Mapping {
             source: RED,
             ink: BLUE,
+            delta_e: 0.0,
         }];
         let rgba = [
             230, 76, 60, 255, 1, 2, 3, 255, 9, 9, 9, 0, 250, 250, 250, 128,
@@ -456,10 +548,12 @@ mod tests {
             Mapping {
                 source: RED,
                 ink: Rgb8::WHITE,
+                delta_e: 0.0,
             },
             Mapping {
                 source: BLUE,
                 ink: BLACK,
+                delta_e: 0.0,
             },
         ];
         // Transparent: on white it takes the white ink, on black the black one.
@@ -473,6 +567,7 @@ mod tests {
         let on_black = [Mapping {
             source: BLACK,
             ink: Rgb8::new(1, 2, 3),
+            delta_e: 0.0,
         }];
         let (out, stats) = run_on(&transparent, &on_black, BLACK);
         assert_eq!(out, [1, 2, 3, 255]);
@@ -485,10 +580,12 @@ mod tests {
             Mapping {
                 source: RED,
                 ink: BLUE,
+                delta_e: 0.0,
             },
             Mapping {
                 source: Rgb8::new(250, 250, 250),
                 ink: BLACK,
+                delta_e: 0.0,
             },
         ];
         let rgba = [230, 76, 60, 255, 1, 2, 3, 255, 250, 250, 250, 255];
@@ -534,6 +631,7 @@ mod tests {
         let mappings = [Mapping {
             source: RED,
             ink: BLUE,
+            delta_e: 0.0,
         }];
         // Blue, red (an exact source) and a blue one step off.
         let rgba = [40, 120, 200, 255, 230, 76, 60, 255, 41, 120, 200, 255];
@@ -558,6 +656,7 @@ mod tests {
         let mappings = [Mapping {
             source: RED,
             ink: BLUE,
+            delta_e: 0.0,
         }];
         let red = [range([230, 76, 60, 255], 0.0)];
         let (out, stats) = run_ranges(&[230, 76, 60, 255], &mappings, Rgb8::WHITE, &red);
@@ -584,6 +683,7 @@ mod tests {
         let mappings = [Mapping {
             source: RED,
             ink: BLUE,
+            delta_e: 0.0,
         }];
         let colors = [
             BLUE,
@@ -643,10 +743,12 @@ mod tests {
             Mapping {
                 source: RED,
                 ink: BLUE,
+                delta_e: 0.0,
             },
             Mapping {
                 source: Rgb8::new(1, 2, 3),
                 ink: BLACK,
+                delta_e: 0.0,
             },
         ];
         let ranges = [
@@ -659,6 +761,11 @@ mod tests {
         let stats = recolor_with_ranges(image, &mappings, material, &ranges, &mut out).unwrap();
 
         let inks: Vec<(Mapping, Lab)> = mappings.iter().map(|&m| (m, lab(m.ink))).collect();
+        let radii = radius_labs(&mappings);
+        let table = Lookup {
+            inks: &inks,
+            radii: &radii,
+        };
         let labs: Vec<(Lab, f32)> = ranges
             .iter()
             .map(|r| (lab(composite(r.pixel, material)), r.delta_e))
@@ -670,7 +777,7 @@ mod tests {
                 unprinted += 1;
                 [0, 0, 0, 0]
             } else {
-                let (ink, _) = lookup(&inks, color);
+                let (ink, _) = table.ink(color);
                 [ink.r, ink.g, ink.b, 255]
             };
             assert_eq!(*got, want, "pixel {pixel:?}");
@@ -681,5 +788,128 @@ mod tests {
             stats.exact + stats.nearest + stats.unprinted,
             u64::from(w * h)
         );
+    }
+
+    // ── Capture radius (a mapping's `delta_e`) ──────────────────────────────────────────────────
+
+    /// A color close to RED (ΔE between 0.5 and 5 from it; checked in the test).
+    const NEAR_RED: Rgb8 = Rgb8::new(226, 82, 66);
+
+    fn mapping(source: Rgb8, ink: Rgb8, delta_e: f32) -> Mapping {
+        Mapping {
+            source,
+            ink,
+            delta_e,
+        }
+    }
+
+    #[test]
+    fn a_pick_captures_colors_within_its_radius_before_the_nearest_ink_rule() {
+        let distance = delta_e_2000_lab(lab(NEAR_RED), lab(RED));
+        assert!(distance > 0.5 && distance < 5.0, "fixture: ΔE {distance}");
+        // BLUE's ink is nearly NEAR_RED, so without a radius NEAR_RED takes it (nearest ink).
+        let near_ink = Rgb8::new(227, 81, 65);
+        let pixel = [NEAR_RED.r, NEAR_RED.g, NEAR_RED.b, 255];
+        let with_radius = |delta_e| [mapping(RED, BLACK, delta_e), mapping(BLUE, near_ink, 0.0)];
+        let (out, stats) = run(&pixel, &with_radius(0.0));
+        assert_eq!(out, [227, 81, 65, 255]);
+        assert_eq!((stats.captured, stats.nearest), (0, 1));
+        // A radius just over the distance: NEAR_RED takes RED's ink.
+        let (out, stats) = run(&pixel, &with_radius(distance + 0.1));
+        assert_eq!(out, [0, 0, 0, 255]);
+        assert_eq!((stats.exact, stats.captured, stats.nearest), (0, 1, 0));
+        // Exactly the distance is still inside (`<=`); just under it is outside.
+        assert_eq!(run(&pixel, &with_radius(distance)).0, [0, 0, 0, 255]);
+        assert_eq!(
+            run(&pixel, &with_radius(distance - 0.1)).0,
+            [227, 81, 65, 255]
+        );
+    }
+
+    #[test]
+    fn an_exact_match_wins_over_a_radius() {
+        // NEAR_RED is inside RED's radius, but it is the second mapping's own source.
+        let mappings = [mapping(RED, BLACK, 50.0), mapping(NEAR_RED, BLUE, 0.0)];
+        let (out, stats) = run(&[226, 82, 66, 255], &mappings);
+        assert_eq!(out, [40, 120, 200, 255]);
+        assert_eq!((stats.exact, stats.captured), (1, 0));
+    }
+
+    #[test]
+    fn overlapping_radii_go_to_the_nearest_source_then_the_earlier_mapping() {
+        let toward_blue = Rgb8::new(60, 115, 190);
+        let pixel = [toward_blue.r, toward_blue.g, toward_blue.b, 255];
+        // Both radii contain the pixel; BLUE's source is nearer.
+        let (out, _) = run(
+            &pixel,
+            &[mapping(RED, BLACK, 100.0), mapping(BLUE, RED, 100.0)],
+        );
+        assert_eq!(out, [230, 76, 60, 255]);
+        // Equal distances (the same source twice): the earlier mapping.
+        let (out, _) = run(
+            &pixel,
+            &[mapping(BLUE, BLACK, 100.0), mapping(BLUE, RED, 100.0)],
+        );
+        assert_eq!(out, [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn ranges_win_over_a_radius() {
+        let image = ImageRef::new(&[226, 82, 66, 255], 1, 1).unwrap();
+        let ranges = [MaterialRange {
+            pixel: Rgba8::new(226, 82, 66, 255),
+            delta_e: 1.0,
+        }];
+        let mut out = [0; 4];
+        let stats = recolor_with_ranges(
+            image,
+            &[mapping(RED, BLACK, 50.0)],
+            Rgb8::WHITE,
+            &ranges,
+            &mut out,
+        )
+        .unwrap();
+        assert_eq!(out, [0, 0, 0, 0]);
+        assert_eq!((stats.unprinted, stats.captured), (1, 0));
+    }
+
+    #[test]
+    fn the_memo_gives_the_same_result_with_radii() {
+        // Large enough to use the memo, with repeated colors around two capture radii.
+        let (w, h) = (400u32, 300u32);
+        let mut state = 11u32;
+        let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+        for _ in 0..w * h {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let v = (state >> 8) & 0x3f3f3f;
+            rgba.extend_from_slice(&[(v >> 16) as u8 * 4, (v >> 8) as u8 * 4, v as u8 * 4, 255]);
+        }
+        let image = ImageRef::new(&rgba, w, h).unwrap();
+        let mappings = [
+            mapping(RED, BLACK, 25.0),
+            mapping(BLUE, Rgb8::new(250, 250, 0), 15.0),
+            mapping(Rgb8::new(128, 128, 128), Rgb8::new(0, 200, 0), 0.0),
+        ];
+        assert!((w * h) as usize > MEMO_MIN_PIXELS);
+        let inks: Vec<(Mapping, Lab)> = mappings.iter().map(|&m| (m, lab(m.ink))).collect();
+        let radii = radius_labs(&mappings);
+        let table = Lookup {
+            inks: &inks,
+            radii: &radii,
+        };
+        let mut out = vec![0; rgba.len()];
+        let stats = recolor(image, &mappings, Rgb8::WHITE, &mut out).unwrap();
+        let mut counts = RecolorStats::default();
+        for (pixel, got) in image.pixels().zip(out.as_chunks::<4>().0) {
+            let (ink, how) = table.ink(composite(pixel, Rgb8::WHITE));
+            assert_eq!(*got, [ink.r, ink.g, ink.b, 255], "pixel {pixel:?}");
+            match how {
+                How::Exact => counts.exact += 1,
+                How::Captured => counts.captured += 1,
+                How::Nearest => counts.nearest += 1,
+            }
+        }
+        assert!(counts.captured > 0, "the fixture must hit a radius");
+        assert_eq!(stats, counts);
     }
 }
