@@ -111,6 +111,45 @@ main thread (Svelte)                      worker (src/lib/worker.ts)
   the material's own color as unprinted.
 - **Errors** come back as values (`AppOutcome`); a crashed worker is restarted and the user is told.
 
+## Session recording (LogRocket)
+
+The published site records visits with [LogRocket](https://logrocket.com). `src/lib/logrocket.ts` is the only code that talks to it.
+
+- **Where:** only on the published site. Everywhere else (the dev server, `vite preview`, the tests, CI's smoke test) LogRocket isn't even loaded:
+  it is a separate file of the build, loaded with `import()` on the published site only, because
+  loading it already contacts LogRocket's servers.
+- **Visitors are told** on the privacy page, `public/privacy.html`, linked as "Privacy" from the
+  header. It lists what is and isn't recorded; keep it in step with `src/lib/logrocket.ts`.
+- **What is recorded:** the page's layout and text, clicks and other input (such as the material
+  color and the inks), console output, uncaught errors, performance data, and the browser's details
+  (type, system, screen, language, referring page), plus the events and error kinds below.
+- **What is not recorded:** IP addresses (`shouldCaptureIP: false`), network requests
+  (`network.isEnabled: false`), and every element marked `data-private`, which LogRocket never
+  sends: the image views (`ImageView.svelte`: the user's image and its preview), and everything
+  that can show a file name (the file details, the status and error lines, the palette dialog, the
+  file inputs). A browser test checks that a file's name never appears outside such an element.
+- **Release:** the commit CI built (`VITE_RELEASE`, set in `../.github/workflows/ci.yml`), so a
+  recording says which code was running; `local` for builds made elsewhere.
+- **Errors:** the kind of every error the app shows (`decodeFailed`, `invalidConfig`, …;
+  `showError` in `App.svelte`), never the message, which can name the user's files. Errors in the
+  engine's worker reach the page with their kind; LogRocket doesn't run in the worker.
+- **No `identify`:** the app has no accounts, so recordings aren't linked to a person by name. They
+  aren't anonymous: the browser's details are recorded.
+- **Events** (`track`), searchable in LogRocket as custom events:
+
+| Event          | When                                    | Properties                            |
+| -------------- | --------------------------------------- | ------------------------------------- |
+| Image opened   | an image is open and its colors counted | `format`, `width`, `height`, `colors` |
+| Pick added     | a click on the original adds a pick     | `picks` (the count after)             |
+| Pick removed   | a pick's × button                       | `picks` (the count after)             |
+| Picks cleared  | "Clear all"                             | `removed`                             |
+| Picks imported | a palette config is imported            | `size`, `picks`, `unprinted`          |
+| Picks exported | "Export picks"                          | `picks`, `unprinted`                  |
+| PNG downloaded | "Download PNG"                          | `picks`, `inks` (distinct inks)       |
+
+Tests: `src/lib/logrocket.test.ts` (with LogRocket replaced by a fake) and, in
+`tests/browser/app.test.ts`, the private parts and the privacy link.
+
 ## Browser differences found by the cross-decoder test
 
 `tests/browser/decoders.test.ts` compares the browser's decoding with `rekolor-io` on the fixtures in
@@ -136,3 +175,9 @@ main thread (Svelte)                      worker (src/lib/worker.ts)
 The favicon (from the 2023 app) is a rainbow icon by Freepik from Flaticon:
 [Rainbow icons created by Freepik - Flaticon](https://www.flaticon.com/free-icons/rainbow)
 (the attribution is also in `public/favicon.html`).
+
+The Rust, WebAssembly, TypeScript and Svelte logos in the header (`src/components/BuiltWith.svelte`)
+are drawn from [Simple Icons](https://simpleicons.org) 16.32.0 (CC0). The Rust logo is the Rust
+Foundation's, licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) (see the
+[Rust media guide](https://www.rust-lang.org/policies/media-guide)). The logos are trademarks of
+their owners and link to their projects' sites.

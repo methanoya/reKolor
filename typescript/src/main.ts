@@ -4,6 +4,11 @@
 import { mount } from 'svelte';
 import App from './App.svelte';
 import './app.css';
+import { startRecording } from './lib/logrocket';
+
+// Session recording, on the published site only (see `lib/logrocket.ts`); first, so it sees the
+// app start.
+startRecording();
 
 // `!` tells TypeScript the element exists (`getElementById` may return `null`).
 mount(App, { target: document.getElementById('app')! });

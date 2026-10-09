@@ -2,16 +2,21 @@
 # opens pull requests that update them. A person reviews each pull request; CI tests it like any
 # other; nothing changes until it is merged.
 #
-# Here it only watches the GitHub Actions used in `.github/workflows/` (the `uses:` lines). Those
-# are pinned to the exact commit of a release, with the release's name in a comment beside it;
-# Dependabot updates both.
+# It watches four things, each in its own folder:
+# - the GitHub Actions used in `.github/workflows/` (the `uses:` lines). Those are pinned to the
+#   exact commit of a release, with the release's name in a comment beside it; Dependabot updates
+#   both;
+# - the web app's npm packages (`typescript/package.json` and its lock file);
+# - the TypeScript contract test's npm packages (`rust/crates/wasm/ts-test/`), a separate project;
+# - the Rust crates (`rust/Cargo.toml` and `rust/Cargo.lock`, for the whole workspace).
+# Each gets at most one pull request a week, with all its updates together.
 #
 # The file is YAML: `key: value` sets a value, indentation shows what belongs to what, a line
 # starting with `- ` is one item of a list, and `#` starts a comment.
 
 # The version of this file's format (always 2).
 version: 2
-# One entry per kind of dependency to watch; this project has one.
+# One entry per kind of dependency and folder.
 updates:
   # GitHub Actions, looked for in the workflow files of the repository's root folder (`/`).
   - package-ecosystem: github-actions
@@ -26,4 +31,43 @@ updates:
     # group is named `actions`; the pattern `*` matches every action.
     groups:
       actions:
+        patterns: ['*']
+
+  # The web app's npm packages. `rekolor-wasm` is this project's own WASM package, built from
+  # `rust/` (`file:` in `package.json`), not one from the npm registry: there is nothing to update.
+  - package-ecosystem: npm
+    directory: /typescript
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: rekolor-wasm
+    groups:
+      web-app:
+        patterns: ['*']
+
+  # The contract test's npm packages (the same `rekolor-wasm` note applies).
+  - package-ecosystem: npm
+    directory: /rust/crates/wasm/ts-test
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: rekolor-wasm
+    groups:
+      contract-test:
+        patterns: ['*']
+
+  # The Rust crates of the workspace. A new Rust version itself is not among them: the toolchain is
+  # pinned in `rust/rust-toolchain.toml` and moved on purpose.
+  - package-ecosystem: cargo
+    directory: /rust
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      rust-crates:
         patterns: ['*']

@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "comlink": "^4.4.2",
+    "logrocket": "^12.4.0",
     "rekolor-wasm": "file:../rust/crates/wasm/pkg"
   },
   "devDependencies": {

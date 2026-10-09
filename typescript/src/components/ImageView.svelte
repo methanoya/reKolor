@@ -310,7 +310,15 @@
        (`class:grabbable` alone means `class:grabbable={grabbable}`). `{onpointerdown}` is short
        for `onpointerdown={onpointerdown}`. `bind:this` stores the element in the variable of
        that name. -->
-  <div class="frame" class:empty={!bitmap} style:background={backdrop} bind:this={frame}>
+  <!-- `data-private`: LogRocket never records the frame or what is in it, so the user's image (and
+       the preview made from it) never leaves the browser (see `lib/logrocket.ts`). -->
+  <div
+    class="frame"
+    class:empty={!bitmap}
+    style:background={backdrop}
+    bind:this={frame}
+    data-private
+  >
     <canvas
       bind:this={canvas}
       class:pickable={!!onpick && !!bitmap}

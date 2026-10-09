@@ -37,6 +37,94 @@ function captureDownload(): Promise<{ name: string; blob: Blob }> {
 }
 
 describe('reKolor app', () => {
+  test('the header links to Rust, WebAssembly, TypeScript and Svelte, no taller than its line', async () => {
+    const screen = await render(App);
+    const builtWith = screen.getByRole('navigation', { name: 'Built with' });
+    const links = [
+      ['Rust', 'https://www.rust-lang.org/'],
+      ['WebAssembly', 'https://webassembly.org/'],
+      ['TypeScript', 'https://www.typescriptlang.org/'],
+      ['Svelte', 'https://svelte.dev/'],
+    ] as const;
+    expect(
+      builtWith
+        .getByRole('link')
+        .elements()
+        .map((a) => a.getAttribute('aria-label')),
+    ).toEqual(links.map(([name]) => name));
+    for (const [name, href] of links) {
+      const link = builtWith.getByRole('link', { name });
+      await expect.element(link).toHaveAttribute('href', href);
+      // A new tab: following a link doesn't leave the app (and lose the open image).
+      await expect.element(link).toHaveAttribute('target', '_blank');
+    }
+    // Every logo fits within the tagline's line height.
+    const tagline = screen.getByText('Preview a picture printed with a limited ink palette.');
+    const lineHeight = Number.parseFloat(getComputedStyle(tagline.element()).lineHeight);
+    for (const logo of builtWith.element().querySelectorAll('svg')) {
+      expect(logo.getBoundingClientRect().height).toBeGreaterThan(0);
+      expect(logo.getBoundingClientRect().height).toBeLessThanOrEqual(lineHeight);
+    }
+  });
+
+  test('file names and images appear only inside parts LogRocket leaves out', async () => {
+    const screen = await render(App);
+    await expect.element(screen.getByText(/Engine ready/)).toBeVisible();
+    // Every text or attribute on the page that names one of the files must be inside an element
+    // marked `data-private` (LogRocket never sends such an element or what is in it).
+    const secret = 'Client Secret';
+    const exposed = () => {
+      const found: string[] = [];
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (node.textContent?.includes(secret) && !node.parentElement?.closest('[data-private]'))
+          found.push(`text: ${node.textContent}`);
+      }
+      for (const element of document.body.querySelectorAll('*')) {
+        for (const attribute of element.attributes) {
+          if (attribute.value.includes(secret) && !element.closest('[data-private]'))
+            found.push(`${element.tagName} ${attribute.name}`);
+        }
+      }
+      return found;
+    };
+
+    // The open image's name (file details, status line).
+    const input = screen.container.querySelector<HTMLInputElement>('#file')!;
+    const image = new File([await fixtureFile('opaque')], `${secret} photo.png`, {
+      type: 'image/png',
+    });
+    await userEvent.upload(page.elementLocator(input), image);
+    await expect.element(screen.getByTestId('file-info')).toMatchTextContent(`${secret} photo.png`);
+    expect(exposed()).toEqual([]);
+
+    // An error naming a config file.
+    const configInput = screen.container.querySelector<HTMLInputElement>('input[accept^=".toml"]')!;
+    const broken = new File(['not a config [[['], `${secret} palette.palettes.toml`);
+    await userEvent.upload(page.elementLocator(configInput), broken);
+    await expect.element(screen.getByRole('alert')).toMatchTextContent(`${secret} palette`);
+    expect(exposed()).toEqual([]);
+
+    // The dialog for a config with several palettes names the file too.
+    const sizes = '[[palette]]\nsize = 1\npicks = []\n\n[[palette]]\nsize = 2\npicks = []\n';
+    await userEvent.upload(
+      page.elementLocator(configInput),
+      new File([sizes], `${secret} sizes.palettes.toml`),
+    );
+    await expect.element(screen.getByRole('dialog')).toMatchTextContent(`${secret} sizes`);
+    expect(exposed()).toEqual([]);
+    await userEvent.keyboard('{Escape}');
+
+    // The image views (the user's image and its preview) and the file inputs are private too.
+    for (const element of screen.container.querySelectorAll('canvas, input[type="file"]')) {
+      expect(element.closest('[data-private]')).not.toBeNull();
+    }
+    // Visitors learn what is recorded from the header's privacy link.
+    await expect
+      .element(screen.getByRole('link', { name: 'Privacy' }))
+      .toHaveAttribute('href', '/privacy.html');
+  });
+
   test('open → pick → recolor → download', async () => {
     const screen = await render(App);
     await expect.element(screen.getByText(/Engine ready/)).toBeVisible();
