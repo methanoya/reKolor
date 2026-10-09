@@ -1,9 +1,39 @@
-#!/usr/bin/env sh
-# Git hook for husky: Git runs it before each commit when `core.hooksPath` points to `.husky/`.
-# This line loads husky's helper script from `.husky/_/`, which husky creates on install.
-. "$(dirname -- "$0")/_/husky.sh"
+# Git runs this before every commit. Husky installs it: `npm ci` or `npm install` in `typescript/`
+# runs the `prepare` script, which points Git's hooks at this folder.
+#
+# It only checks: nothing is changed or staged. A failing check stops the commit with its message;
+# fix the problem, stage the fix and commit again (`git commit --no-verify` skips the checks). Each
+# part runs only when the commit includes files from its folder, and it checks the files as they
+# are on disk, including changes not staged for this commit.
+#
+# Husky runs this file with `sh -e`, so any failing command ends it with that failure.
 
-echo running husky pre-commit
-# Run the web app's `pre-commit` npm script, then re-stage the tracked files it changed (for
-# example, reformatted ones).
-cd typescript && npm run pre-commit && git add --update .
+staged=$(git diff --cached --name-only)
+
+# Rust: formatting, then clippy for the native build and for the WebAssembly build (the WASM test
+# suite, `crates/wasm/tests/node.rs`, compiles only for WebAssembly).
+if echo "$staged" | grep -q '^rust/'; then
+  echo 'pre-commit: Rust: cargo fmt --check, clippy (native and wasm32)'
+  (
+    cd rust
+    cargo fmt --all --check || {
+      echo 'pre-commit: run `cargo fmt --all` in rust/ to fix the formatting'
+      exit 1
+    }
+    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy -p rekolor-wasm --all-targets --target wasm32-unknown-unknown -- -D warnings
+  )
+fi
+
+# Web app: ESLint and Prettier (`npm run lint`), then svelte-check (`npm run check`).
+if echo "$staged" | grep -q '^typescript/'; then
+  echo 'pre-commit: web app: npm run lint, npm run check'
+  (
+    cd typescript
+    npm run lint || {
+      echo 'pre-commit: `npm run format` in typescript/ fixes Prettier problems (not ESLint ones)'
+      exit 1
+    }
+    npm run check
+  )
+fi

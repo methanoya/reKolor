@@ -24,6 +24,11 @@ made from changes (`core`, `config`, `wasm`: sources and manifests; `wasm-watch.
 the page; a failed build shows in the terminal and the browser's error overlay, and the page isn't
 reloaded. `REKOLOR_WASM_WATCH=0 npm run dev` turns that off.
 
+`npm ci` also installs the Git hooks (`../.husky/`, through the `prepare` script). Before each
+commit they check what the commit touches: for `rust/`, `cargo fmt --check` and clippy for the
+native and wasm32 builds; for `typescript/`, `npm run lint` and `npm run check`. They never change
+or stage files. `git commit --no-verify` skips them; `HUSKY=0` disables them.
+
 ## Scripts
 
 | Script                 | What                                                                                                                                                                                            |

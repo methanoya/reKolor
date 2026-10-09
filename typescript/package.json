@@ -14,7 +14,8 @@
     "format": "prettier --write .",
     "test": "vitest run --project node",
     "test:browser": "vitest run --project browser",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "prepare": "cd .. && husky"
   },
   "dependencies": {
     "comlink": "^4.4.2",
@@ -29,6 +30,7 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-svelte": "^3.23.0",
     "globals": "^17.13.0",
+    "husky": "^9.1.7",
     "playwright": "^1.64.0",
     "prettier": "^3.9.9",
     "prettier-plugin-svelte": "^4.1.1",
