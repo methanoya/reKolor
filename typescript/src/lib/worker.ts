@@ -73,6 +73,8 @@ const api = {
   rematch: (picks: { pixel: Rgba; matching: Rgb }[], material: Rgb) =>
     withSession((s) => s.rematch(picks, material)),
   nearest: (color: Rgb, k?: number) => withSession((s) => s.nearest(color, k)),
+  unprintedColors: (colors: Rgb[], material: Rgb, materialRanges: MaterialRange[]) =>
+    withSession((s) => s.unprintedColors(colors, material, materialRanges)),
   recolor: async (
     generation: number,
     revision: number,

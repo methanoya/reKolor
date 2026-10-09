@@ -81,10 +81,7 @@ pub fn recolor_with_ranges(
     // pixel against them, and converting inside the loop would repeat that work millions of times.
     // `(Mapping, Lab)` is a tuple, an unnamed pair of values.
     let inks: Vec<(Mapping, Lab)> = mappings.iter().map(|&m| (m, lab(m.ink))).collect();
-    let ranges: Vec<(Lab, f32)> = ranges
-        .iter()
-        .map(|r| (lab(composite(r.pixel, material)), r.delta_e))
-        .collect();
+    let ranges = range_labs(ranges, material);
     let pixel_count = input.len() / 4;
     // The memo (a cache of answers per color) only pays off for larger images; `.then(|| ...)`
     // builds it (`Some(table)`) only when the condition is true, and leaves `None` otherwise.
@@ -160,6 +157,21 @@ enum Decided {
     Ink { ink: Rgb8, exact: bool },
     /// Within a material range: no ink.
     Unprinted,
+}
+
+/// Whether [`recolor_with_ranges`] leaves a composited color unprinted on `material`: the same
+/// test it applies to every pixel. `color` is a color as recolor matches it (already composited
+/// over the material, like a pick's matching color).
+pub fn is_unprinted(color: Rgb8, material: Rgb8, ranges: &[MaterialRange]) -> bool {
+    in_range(&range_labs(ranges, material), color)
+}
+
+/// Each range's center (its pixel composited over `material`) in Lab, with its ΔE.
+fn range_labs(ranges: &[MaterialRange], material: Rgb8) -> Vec<(Lab, f32)> {
+    ranges
+        .iter()
+        .map(|r| (lab(composite(r.pixel, material)), r.delta_e))
+        .collect()
 }
 
 // `any` is true as soon as one range contains the color (it stops at the first).
@@ -564,6 +576,50 @@ mod tests {
         // A range made from a transparent pixel follows the material: on white it is white.
         let (out, _) = run_ranges(&rgba, &[], Rgb8::WHITE, &[range([9, 9, 9, 0], 0.0)]);
         assert_eq!(out, [0, 0, 0, 0, 0, 0, 0, 255, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn is_unprinted_agrees_with_recolor() {
+        let ranges = [range([40, 120, 200, 255], 2.0), range([0, 0, 0, 255], 0.0)];
+        let mappings = [Mapping {
+            source: RED,
+            ink: BLUE,
+        }];
+        let colors = [
+            BLUE,
+            Rgb8::new(41, 120, 200),
+            Rgb8::new(60, 120, 200),
+            RED,
+            BLACK,
+            Rgb8::WHITE,
+        ];
+        let (mut unprinted, mut printed) = (0, 0);
+        for material in [Rgb8::WHITE, BLACK] {
+            for c in colors {
+                // An opaque one-pixel image of the color: recolor leaves it transparent exactly
+                // when the color is unprinted.
+                let (out, _) = run_ranges(&[c.r, c.g, c.b, 255], &mappings, material, &ranges);
+                let expected = out[3] == 0;
+                assert_eq!(
+                    is_unprinted(c, material, &ranges),
+                    expected,
+                    "{c:?} on {material:?}"
+                );
+                if expected {
+                    unprinted += 1
+                } else {
+                    printed += 1
+                }
+            }
+        }
+        assert!(unprinted > 0 && printed > 0);
+        // A range made from a transparent pixel is the material itself.
+        assert!(is_unprinted(BLACK, BLACK, &[range([9, 9, 9, 0], 0.0)]));
+        assert!(!is_unprinted(
+            BLACK,
+            Rgb8::WHITE,
+            &[range([9, 9, 9, 0], 0.0)]
+        ));
     }
 
     #[test]

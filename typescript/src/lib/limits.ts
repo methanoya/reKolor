@@ -1,4 +1,5 @@
-// Resource limits: checked before any pixel buffer is allocated.
+// Resource limits: checked before the app allocates its own pixel buffers. The image size can only
+// be checked once the browser has decoded the file (see `decodeImage` in `codec.ts`).
 
 // `as const` makes the object read-only to TypeScript and keeps each value's exact type; the
 // object itself can still be changed at runtime (unlike `Object.freeze`, see `picks.ts`). `_` in a

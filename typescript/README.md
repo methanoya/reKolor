@@ -54,7 +54,10 @@ main thread (Svelte)                      worker (src/lib/worker.ts)
 
 - **Decoding** happens in the browser, inside the worker: EXIF orientation applied, the color
   profile converted to sRGB. The size limits (50 MB file, 16,384 px per side, 24 megapixels) are
-  checked before any pixel buffer is made.
+  checked before the app makes its own pixel buffers. Known limitation: the width and height are
+  only known once the browser has decoded the file, so a small, highly compressed file with huge
+  dimensions can use a lot of memory (and crash the worker or the tab) before it is refused. Only
+  the person who opened the file is affected.
 - **Picking:** a click maps through the zoom/pan transform to a source pixel; Rust reads the stored
   pixel, composites it over the material and suggests the nearest ink. At 100 % and above the color
   on screen is sent too, and Rust warns if it differs from the stored pixel.
@@ -85,7 +88,8 @@ main thread (Svelte)                      worker (src/lib/worker.ts)
   the same way: one entry that follows the material and keeps its ΔE (added again after × on the
   next choice). Every pixel within an entry's ΔE takes no ink and is transparent in the result, so
   the preview shows the material there and the downloaded PNG is transparent. Entries are checked
-  before the picks. A new image clears the clicked entries; the material's stays. Exported configs
+  before the picks, so a pick whose own color an entry covers says so in its row ("Its color is
+  left unprinted"), by the same test recolor uses (`unprintedColors` in Rust). A new image clears the clicked entries; the material's stays. Exported configs
   carry the entries (`unprinted`); an import replaces them with the file's (imported ones have no
   square, as imported picks have no circle). At most 256 entries, the material's own included (the
   palette-config and WASM limit): a click past that is refused, and a material chosen when the

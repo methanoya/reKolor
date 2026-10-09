@@ -46,6 +46,8 @@ pub enum ErrorKind {
     InvalidConfig,
     /// More recolor mappings than allowed (256, the palette-config limit).
     TooManyMappings,
+    /// More material ranges (colors left unprinted) than allowed (256, the palette-config limit).
+    TooManyRanges,
 }
 
 // Every core error becomes an `ErrorInfo` with a matching kind. The `_ =>` arm is required because
@@ -107,6 +109,8 @@ extern "C" {
     pub type ColorCountOutcome;
     #[wasm_bindgen(typescript_type = "Outcome<Rgb>")]
     pub type RgbOutcome;
+    #[wasm_bindgen(typescript_type = "Outcome<UnprintedColors>")]
+    pub type UnprintedColorsOutcome;
 }
 
 // `pub(crate)`: visible to the rest of this crate, not to JavaScript or other crates.

@@ -9,6 +9,7 @@ import {
   composite,
   parseConfig,
   serializeConfig,
+  unprintedColors,
   type ConfigPick,
   type ConfigSection,
   type ConfigUnprinted,
@@ -128,6 +129,19 @@ export class Engine {
   /** A pixel composited over the material: the color recolor matches (computed in Rust). */
   composite(pixel: Rgba, material: Rgb): AppOutcome<Rgb> {
     return fromWasm(composite(pixel, material));
+  }
+
+  /**
+   * Which colors (as recolor matches them, e.g. the picks' `matching`) the material ranges leave
+   * unprinted on the material: one flag per color, by recolor's own test (computed in Rust).
+   */
+  unprintedColors(
+    colors: Rgb[],
+    material: Rgb,
+    materialRanges: MaterialRange[],
+  ): AppOutcome<boolean[]> {
+    const outcome = fromWasm(unprintedColors({ colors, material, materialRanges }));
+    return outcome.status === 'ok' ? ok(outcome.value.unprinted) : outcome;
   }
 
   // `k: number = ALTERNATIVES` is a default parameter value, used when `k` is omitted.

@@ -30,16 +30,17 @@ pub use config::{
     ResolvedPick, ResolvedPicks, parse_config, serialize_config,
 };
 pub use image::SourceImageOutcome;
-pub use image::{SourceImage, composite};
+pub use image::{SourceImage, composite, unprinted_colors};
 pub use outcome::{
     ColorCountOutcome, ErrorInfo, ErrorKind, ImageStatsOutcome, NearestOutcome, Outcome,
-    PickOutcome, RecolorOutcome, RgbOutcome, SuggestOutcome,
+    PickOutcome, RecolorOutcome, RgbOutcome, SuggestOutcome, UnprintedColorsOutcome,
 };
 pub use palette::Palette;
 pub use palette::PaletteOutcome;
 pub use types::{
     ColorCount, ColorMismatch, ImageStats, Mapping, MaterialRange, PaletteData, PaletteEntry,
-    PaletteMatch, PaletteMatches, Pick, RecolorRequest, RecolorStats, Rgb, Rgba,
+    PaletteMatch, PaletteMatches, Pick, RecolorRequest, RecolorStats, Rgb, Rgba, UnprintedCheck,
+    UnprintedColors,
 };
 
 // `prelude::*` imports the names every wasm-bindgen user needs (`wasm_bindgen`, `JsValue`, …).

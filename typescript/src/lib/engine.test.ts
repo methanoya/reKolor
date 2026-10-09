@@ -231,4 +231,23 @@ describe('Engine configs', () => {
     });
     engine.dispose();
   });
+
+  test('unprintedColors flags the colors the ranges leave unprinted, on the material', () => {
+    const engine = value(Engine.create(palette));
+    const black = { pixel: { ...BLACK, a: 255 }, deltaE: 10 };
+    const colors = [BLACK, { r: 230, g: 76, b: 60 }];
+    expect(value(engine.unprintedColors(colors, WHITE, [black]))).toEqual([true, false]);
+    expect(value(engine.unprintedColors(colors, WHITE, []))).toEqual([false, false]);
+    // A range made from a transparent pixel is the material itself.
+    const clear = { pixel: { r: 9, g: 9, b: 9, a: 0 }, deltaE: 0 };
+    expect(value(engine.unprintedColors(colors, BLACK, [clear]))).toEqual([true, false]);
+    expect(
+      engine.unprintedColors(
+        colors,
+        WHITE,
+        Array.from({ length: 257 }, () => black),
+      ),
+    ).toMatchObject({ status: 'error', error: { kind: 'tooManyRanges' } });
+    engine.dispose();
+  });
 });

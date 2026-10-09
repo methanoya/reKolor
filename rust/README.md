@@ -78,7 +78,7 @@ The package's `.d.ts` carries the whole contract. Usage from TypeScript (in the 
 a Web Worker):
 
 ```ts
-import init, { Palette, SourceImage, composite, parseConfig, serializeConfig } from 'rekolor-wasm';
+import init, { Palette, SourceImage, composite, parseConfig, serializeConfig, unprintedColors } from 'rekolor-wasm';
 
 await init();
 
@@ -105,6 +105,8 @@ const result = image.recolor({ mappings, material }, new Uint8Array(out.data.buf
 const ranges = [{ pixel: { ...material, a: 255 }, deltaE: 10 }];  // the material's own color
 image.recolor({ mappings, material, materialRanges: ranges }, new Uint8Array(out.data.buffer));
 const matching = composite({ r: 203, g: 0, b: 0, a: 100 }, material); // a pixel as recolor sees it
+// Which colors (as recolor matches them) the ranges leave unprinted, by recolor's own test:
+const flags = unprintedColors({ colors: [matching], material, materialRanges: ranges }); // Outcome<{ unprinted: boolean[] }>
 
 image.free(); // or `using` / Symbol.dispose
 
@@ -118,8 +120,9 @@ const text = serializeConfig({ imageName: 'tiger.png', material, picks: [{ rgba,
 The material is a required argument everywhere it is used (`pick`, `recolor`, `colorCount`,
 `analyze`, `resolveSection`, `serializeConfig`): there is no hidden white default at the boundary.
 `SourceImage.colorCount(material)` is the bounded color count (2 MiB, whatever the image); `recolor`
-accepts at most 256 mappings and 256 material ranges (`tooManyMappings`), the palette-config limit,
-and a range's `deltaE` from 0 to 100 (`invalidInput` otherwise).
+accepts at most 256 mappings (`tooManyMappings`) and 256 material ranges (`tooManyRanges`), the
+palette-config limits, and a range's `deltaE` from 0 to 100 (`invalidInput` otherwise);
+`unprintedColors` checks its ranges the same way.
 
 The WASM file is about 360 KB (150 KB gzipped); the TOML parser for `*.palettes.toml` is a large
 part of it.

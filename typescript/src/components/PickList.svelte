@@ -16,13 +16,15 @@
     picks: PickEntry[];
     /** The material the picks are matched on. */
     material: Rgb;
+    /** Ids of the picks whose own color is left unprinted (an unprinted color covers it). */
+    unprinted?: number[];
     onink: (id: number, index: number) => void;
     onremove: (id: number) => void;
   }
 
   // `$props()` is a Svelte "rune" (a compiler instruction, recognizable by the `$`): it receives
   // the props, and the template updates whenever the parent passes new values.
-  let { picks, material, onink, onremove }: Props = $props();
+  let { picks, material, unprinted = [], onink, onremove }: Props = $props();
 
   // `$derived(expression)` is recomputed automatically whenever a value it reads (`material`)
   // changes.
@@ -85,6 +87,11 @@
             <span class="warning" role="note">
               Shown as {hex(pick.mismatch.seen)}, stored as {hex(pick.mismatch.stored)}
             </span>
+          {/if}
+          {#if unprinted.includes(pick.id)}
+            <span class="unprinted" role="note"
+              >Its color is left unprinted (the material shows)</span
+            >
           {/if}
         </div>
         <button
@@ -215,6 +222,10 @@
   .warning {
     font-size: 0.8rem;
     color: var(--warning);
+  }
+  .unprinted {
+    font-size: 0.8rem;
+    color: var(--muted);
   }
   .remove {
     font-size: 1.3rem;

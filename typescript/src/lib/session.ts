@@ -137,6 +137,14 @@ export class Session {
     return this.#engine.nearest(color, k);
   }
 
+  unprintedColors(
+    colors: Rgb[],
+    material: Rgb,
+    materialRanges: MaterialRange[],
+  ): AppOutcome<boolean[]> {
+    return this.#engine.unprintedColors(colors, material, materialRanges);
+  }
+
   async recolor(
     generation: number,
     revision: number,

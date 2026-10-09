@@ -19,8 +19,10 @@ export interface Decoded {
 // `Blob` is file-like binary data; a `File` from a file input or a drop is one.
 /**
  * Decodes an image file: EXIF orientation applied, the embedded color profile converted to sRGB,
- * straight (not premultiplied) alpha in the result. The size limits are checked before any
- * pixel buffer is made.
+ * straight (not premultiplied) alpha in the result. The file size is checked before decoding; the
+ * width and height only after the browser has decoded the image, but before the app makes its own
+ * pixel buffers. A known limitation: a small, highly compressed file with huge dimensions can make
+ * the browser allocate a lot of memory (and crash the worker or the tab) before it is refused.
  *
  * Canvases store premultiplied alpha internally, so semi-transparent colors can come back slightly
  * changed; the cross-decoder test measures this.

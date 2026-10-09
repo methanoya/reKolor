@@ -13,6 +13,7 @@ import {
   composite,
   parseConfig,
   serializeConfig,
+  unprintedColors,
   type PaletteData,
   type RecolorRequest,
   type Rgb,
@@ -408,6 +409,22 @@ describe('the material color', () => {
         error: { kind: 'invalidInput' },
       });
     }
+  });
+
+  test('unprintedColors flags what recolor leaves unprinted; too many ranges is tooManyRanges', () => {
+    const range = { pixel: { ...BLACK, a: 255 }, deltaE: 10 };
+    const colors = [BLACK, { r: 10, g: 10, b: 10 }, RED];
+    const flags = unwrap(unprintedColors({ colors, material: WHITE, materialRanges: [range] }));
+    expect(flags.unprinted).toEqual([true, true, false]);
+
+    const tooMany = Array.from({ length: 257 }, () => range);
+    expect(
+      unprintedColors({ colors, material: WHITE, materialRanges: tooMany }),
+    ).toMatchObject({ status: 'error', error: { kind: 'tooManyRanges' } });
+    const image = redAndTransparent();
+    expect(
+      image.recolor({ mappings: [], material: WHITE, materialRanges: tooMany }, new Uint8Array(8)),
+    ).toMatchObject({ status: 'error', error: { kind: 'tooManyRanges' } });
   });
 });
 

@@ -109,6 +109,8 @@
   /** Colors left unprinted: pixels within ΔE of them take no ink; the material shows. */
   let ranges = $state<RangeEntry[]>([]);
   let nextRangeId = 1;
+  /** Ids of the picks whose own color is left unprinted (shown in the pick list). */
+  let unprintedPicks = $state.raw<number[]>([]);
   /** The next click on the original adds a material range instead of a pick. */
   let addingRange = $state(false);
   /**
@@ -736,15 +738,38 @@
       result?.close();
       result = undefined;
       resultRevision = -1;
+      unprintedPicks = [];
       return;
     }
+    const materialRanges = ranges.map((r) => ({
+      pixel: $state.snapshot(r.pixel),
+      deltaE: r.deltaE,
+    }));
     recolorer.request({
       generation,
       revision,
       mappings: $state.snapshot(mappings(picks)),
       material,
-      materialRanges: ranges.map((r) => ({ pixel: $state.snapshot(r.pixel), deltaE: r.deltaE })),
+      materialRanges,
     });
+    void checkUnprinted(revision, materialRanges);
+  }
+
+  /**
+   * Finds the picks whose own color the unprinted colors cover (recolor's own test, in the
+   * worker), for the note in the pick list. Only the answer for the current revision is kept.
+   */
+  async function checkUnprinted(rev: number, materialRanges: { pixel: Rgba; deltaE: number }[]) {
+    if (materialRanges.length === 0) {
+      unprintedPicks = [];
+      return;
+    }
+    const ids = picks.map((p) => p.id);
+    const colors = picks.map((p) => $state.snapshot(p.matching));
+    const on = material;
+    const outcome = await client.call((api) => api.unprintedColors(colors, on, materialRanges));
+    if (rev !== revision) return;
+    unprintedPicks = outcome.status === 'ok' ? ids.filter((_, i) => outcome.value[i]) : [];
   }
 
   // ── Download: always the current revision at full resolution ───────────────────────────────────
@@ -1004,7 +1029,13 @@
       </div>
       <!-- The pick list (`components/PickList.svelte`): it shows the picks and reports changes
            through `onink` and `onremove`. -->
-      <PickList {picks} {material} onink={changeInk} onremove={removePick} />
+      <PickList
+        {picks}
+        {material}
+        unprinted={unprintedPicks}
+        onink={changeInk}
+        onremove={removePick}
+      />
     </section>
 
     <section class="material-section" aria-labelledby="material-title">

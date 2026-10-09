@@ -18,7 +18,8 @@ use rekolor_wasm::{
     ColorCount, ConfigExport, ConfigPick, ConfigSection, ConfigText, ConfigUnprinted, ErrorKind,
     ImageStats, Mapping, MaterialRange, Outcome, Palette, PaletteData, PaletteEntry, PaletteMatch,
     PaletteMatches, ParsedConfig, Pick, RecolorRequest, RecolorStats, ResolvedPicks, Rgb, Rgba,
-    SourceImage, composite, parse_config, serialize_config,
+    SourceImage, UnprintedCheck, UnprintedColors, composite, parse_config, serialize_config,
+    unprinted_colors,
 };
 use serde::de::DeserializeOwned;
 use tsify::{Ts, Tsify};
@@ -851,6 +852,71 @@ fn material_ranges_leave_pixels_transparent_and_are_checked() {
     assert_eq!(
         error_kind::<RecolorStats>(read(
             image.recolor(request(vec![black(1.0); 257]), &mut out)
+        )),
+        ErrorKind::TooManyRanges
+    );
+}
+
+#[wasm_bindgen_test]
+fn unprinted_colors_match_what_recolor_leaves_transparent() {
+    let black = MaterialRange {
+        pixel: Rgba {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 255,
+        },
+        delta_e: 10.0,
+    };
+    let check = |colors: Vec<Rgb>, material: [u8; 3], ranges: Vec<MaterialRange>| {
+        read::<UnprintedColors>(unprinted_colors(
+            Ts::from_rust(&UnprintedCheck {
+                colors,
+                material: rgb(material),
+                material_ranges: ranges,
+            })
+            .unwrap(),
+        ))
+    };
+    // Black and a near-black are within ΔE 10 of black; red is not.
+    let colors = vec![rgb([0, 0, 0]), rgb([10, 10, 10]), rgb([230, 76, 60])];
+    let flags = ok(check(colors.clone(), [255, 255, 255], vec![black]));
+    assert_eq!(flags.unprinted, [true, true, false]);
+    // The same as recolor: a one-pixel image of each color is transparent exactly when flagged.
+    for (color, flag) in colors.iter().zip(&flags.unprinted) {
+        let image = SourceImage::from_rgba(vec![color.r, color.g, color.b, 255], 1, 1).unwrap();
+        let mut out = [0u8; 4];
+        let request = Ts::from_rust(&RecolorRequest {
+            mappings: vec![],
+            material: rgb([255, 255, 255]),
+            material_ranges: vec![black],
+        })
+        .unwrap();
+        let _: RecolorStats = ok(read(image.recolor(request, &mut out)));
+        assert_eq!(out[3] == 0, *flag, "{color:?}");
+    }
+    // No ranges: nothing is unprinted. Limits and ΔE are checked as for recolor.
+    assert_eq!(
+        ok(check(colors.clone(), [255, 255, 255], vec![])).unprinted,
+        [false; 3]
+    );
+    assert_eq!(
+        error_kind(check(colors.clone(), [255, 255, 255], vec![black; 257])),
+        ErrorKind::TooManyRanges
+    );
+    let bad = MaterialRange {
+        delta_e: 101.0,
+        ..black
+    };
+    assert_eq!(
+        error_kind(check(colors, [255, 255, 255], vec![bad])),
+        ErrorKind::InvalidInput
+    );
+    assert_eq!(
+        error_kind(check(
+            vec![rgb([0, 0, 0]); 257],
+            [255, 255, 255],
+            vec![black]
         )),
         ErrorKind::TooManyMappings
     );

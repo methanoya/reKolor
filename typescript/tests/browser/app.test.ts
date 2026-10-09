@@ -752,6 +752,20 @@ describe('reKolor app', () => {
 
   // ── Colors left unprinted ──────────────────────────────────────────────────────────────────────
 
+  test('a pick whose color is left unprinted says so in its row', async () => {
+    const { screen } = await opened(await materialFile(), [-18, 18]); // opaque red, opaque black
+    const notes = () =>
+      [...screen.container.querySelectorAll('.pick')].map(
+        (row) => row.querySelector('.unprinted')?.textContent?.trim() ?? '',
+      );
+    expect(notes()).toEqual(['', '']);
+    // Black as the material leaves black (within ΔE 10) unprinted: the black pick's color.
+    await screen.getByRole('button', { name: 'Black' }).click();
+    await expect.poll(notes).toEqual(['', 'Its color is left unprinted (the material shows)']);
+    await screen.getByRole('button', { name: 'Reset' }).click();
+    await expect.poll(notes).toEqual(['', '']);
+  });
+
   test('a chosen material adds one "Not printed" entry that follows it and keeps its ΔE', async () => {
     const { screen } = await opened(await materialFile(), []);
     const slider = () => screen.container.querySelector<HTMLInputElement>('.range-delta input')!;

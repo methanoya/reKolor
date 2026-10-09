@@ -5,10 +5,13 @@ use tsify::Ts;
 use wasm_bindgen::prelude::*;
 
 use crate::outcome::{
-    ColorCountOutcome, ImageStatsOutcome, PickOutcome, RecolorOutcome, RgbOutcome, error_object,
-    ok_object, outcome_js, whole_u32,
+    ColorCountOutcome, ImageStatsOutcome, PickOutcome, RecolorOutcome, RgbOutcome,
+    UnprintedColorsOutcome, error_object, ok_object, outcome_js, whole_u32,
 };
-use crate::{ColorCount, ErrorInfo, ImageStats, Outcome, Palette, RecolorRequest, Rgb, Rgba};
+use crate::{
+    ColorCount, ErrorInfo, ImageStats, MaterialRange, Outcome, Palette, RecolorRequest, Rgb, Rgba,
+    UnprintedCheck, UnprintedColors,
+};
 
 #[wasm_bindgen]
 extern "C" {
@@ -119,35 +122,7 @@ impl SourceImage {
                         ),
                     });
                 }
-                if request.material_ranges.len() > rekolor_config::MAX_PICKS {
-                    return Err(ErrorInfo {
-                        kind: crate::ErrorKind::TooManyMappings,
-                        message: format!(
-                            "{} material ranges; at most {} are allowed",
-                            request.material_ranges.len(),
-                            rekolor_config::MAX_PICKS
-                        ),
-                    });
-                }
-                // Check each range's ΔE and convert it to the core type; the first invalid one ends
-                // the call.
-                let ranges = request
-                    .material_ranges
-                    .iter()
-                    .map(|r| {
-                        if (0.0..=100.0).contains(&r.delta_e) {
-                            Ok(core::MaterialRange {
-                                pixel: r.pixel.into(),
-                                delta_e: r.delta_e,
-                            })
-                        } else {
-                            Err(ErrorInfo {
-                                kind: crate::ErrorKind::InvalidInput,
-                                message: format!("deltaE must be from 0 to 100, got {}", r.delta_e),
-                            })
-                        }
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
+                let ranges = core_ranges(&request.material_ranges)?;
                 let mappings: Vec<core::Mapping> =
                     request.mappings.into_iter().map(Into::into).collect();
                 Ok(crate::RecolorStats::from(core::recolor_with_ranges(
@@ -212,6 +187,70 @@ pub fn composite(pixel: Ts<Rgba>, material: Ts<Rgb>) -> RgbOutcome {
 
 // Rust-only methods: this second `impl` block has no `#[wasm_bindgen]`, so JavaScript never sees
 // it.
+/// Which of `colors` (as recolor matches them, composited over the material) recolor leaves
+/// unprinted with these material ranges: the same test it applies to every pixel. At most 256
+/// colors and 256 ranges, each `deltaE` from 0 to 100.
+#[wasm_bindgen(js_name = unprintedColors)]
+pub fn unprinted_colors(request: Ts<UnprintedCheck>) -> UnprintedColorsOutcome {
+    let outcome = request
+        .to_rust()
+        .map_err(ErrorInfo::from)
+        .and_then(|request| {
+            if request.colors.len() > rekolor_config::MAX_PICKS {
+                return Err(ErrorInfo {
+                    kind: crate::ErrorKind::TooManyMappings,
+                    message: format!(
+                        "{} colors; at most {} are allowed",
+                        request.colors.len(),
+                        rekolor_config::MAX_PICKS
+                    ),
+                });
+            }
+            let ranges = core_ranges(&request.material_ranges)?;
+            let material = request.material.into();
+            Ok(UnprintedColors {
+                unprinted: request
+                    .colors
+                    .into_iter()
+                    .map(|c| core::is_unprinted(c.into(), material, &ranges))
+                    .collect(),
+            })
+        });
+    outcome_js(Outcome::from(outcome))
+}
+
+/// Checks the material ranges of a request and converts them to the core type: at most 256
+/// (`tooManyRanges`), each `deltaE` from 0 to 100 (`invalidInput`); the first invalid one ends
+/// the call.
+fn core_ranges(ranges: &[MaterialRange]) -> Result<Vec<core::MaterialRange>, ErrorInfo> {
+    if ranges.len() > rekolor_config::MAX_UNPRINTED {
+        return Err(ErrorInfo {
+            kind: crate::ErrorKind::TooManyRanges,
+            message: format!(
+                "{} material ranges; at most {} are allowed",
+                ranges.len(),
+                rekolor_config::MAX_UNPRINTED
+            ),
+        });
+    }
+    ranges
+        .iter()
+        .map(|r| {
+            if (0.0..=100.0).contains(&r.delta_e) {
+                Ok(core::MaterialRange {
+                    pixel: r.pixel.into(),
+                    delta_e: r.delta_e,
+                })
+            } else {
+                Err(ErrorInfo {
+                    kind: crate::ErrorKind::InvalidInput,
+                    message: format!("deltaE must be from 0 to 100, got {}", r.delta_e),
+                })
+            }
+        })
+        .collect()
+}
+
 impl SourceImage {
     /// Rust-side constructor (not exported); used by `create` and by tests.
     pub fn from_rgba(rgba: Vec<u8>, width: u32, height: u32) -> Result<SourceImage, ErrorInfo> {

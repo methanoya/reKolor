@@ -59,6 +59,25 @@ pub struct RecolorRequest {
     pub material_ranges: Vec<MaterialRange>,
 }
 
+/// Colors to check against material ranges (`unprintedColors`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Tsify)]
+#[serde(rename_all = "camelCase")]
+pub struct UnprintedCheck {
+    /// Colors as recolor matches them (composited over the material), e.g. the picks' `matching`.
+    /// At most 256.
+    pub colors: Vec<Rgb>,
+    pub material: Rgb,
+    /// The same ranges as in a `RecolorRequest`.
+    pub material_ranges: Vec<MaterialRange>,
+}
+
+/// Which colors recolor leaves unprinted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+pub struct UnprintedColors {
+    /// One flag per color, in order: `true` if recolor leaves that color unprinted.
+    pub unprinted: Vec<bool>,
+}
+
 // Counts are `f64` because JavaScript has a single number type (a 64-bit float); a Rust `u64`
 // would become a `BigInt` instead.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Tsify)]
