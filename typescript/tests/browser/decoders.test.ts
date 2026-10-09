@@ -5,7 +5,8 @@
 // - alpha ramp: alpha exact, colors composited over white within ±1 (what recolor sees);
 // - ICC profile: `rekolor-io` keeps the stored values and reports the profile; Chromium and WebKit
 //   apply it, Firefox doesn't (see `README.md`). The size must match and the decoder warning must
-//   be recorded; the color difference depends on the browser, so it is logged, not asserted.
+//   be recorded; the colors must differ in Chromium and WebKit and match exactly in Firefox, so a
+//   browser that changes how it handles the profile fails here. The largest difference is logged.
 
 // Browser tests (`npm run test:browser`), run in each browser engine; `server.browser` names the
 // current one in the test titles. The reference pixels are the `.rgba` files written by the Rust
@@ -100,7 +101,7 @@ describe(`browser decoding vs rekolor-io (${server.browser})`, () => {
     expect(worst).toBeLessThanOrEqual(1);
   });
 
-  test('ICC profile: same size and a reported warning; the color difference is logged', async () => {
+  test('ICC profile: same size and a reported warning; applied except in Firefox', async () => {
     const ref = reference('icc-swapped');
     expect(ref.warnings).toContain('IccProfile');
     const got = await browserDecode('icc-swapped');
@@ -109,7 +110,8 @@ describe(`browser decoding vs rekolor-io (${server.browser})`, () => {
     let worst = 0;
     for (let i = 0; i < rust.length; i++)
       worst = Math.max(worst, Math.abs(got.rgba[i]! - rust[i]!));
-    expect(worst).toBeGreaterThan(0);
+    if (server.browser === 'firefox') expect(worst).toBe(0);
+    else expect(worst).toBeGreaterThan(0);
     console.info(
       `[decoders] ${server.browser}: ICC-profiled PNG, largest channel difference ${worst}`,
     );

@@ -1,97 +1,184 @@
-# Continuous integration: checks, builds and tests everything the local checks cover
-# (`rust/README.md`, "Checks"; `typescript/README.md`, "Scripts") on every pull request and every
-# push to `main`. A version tag (`v1.2.3`), or a manual run on `main`, also publishes the web app to
-# GitHub Pages through the `releases` branch.
+# Continuous integration (CI): GitHub checks, builds and tests the project by itself, on every pull
+# request and every push to `main`, the same way the local checks do (`rust/README.md`, "Checks";
+# `typescript/README.md`, "Scripts"). A version tag (`v1.2.3`), or a manual run on `main`, also
+# publishes the web app to GitHub Pages through the `releases` branch.
 #
-# How the jobs depend on each other:
+# ── How to read this file ─────────────────────────────────────────────────────────────────────────
+#
+# This is a GitHub Actions "workflow". GitHub reads every file in `.github/workflows/` and runs it
+# on its own computers whenever one of the events listed under `on:` happens. Each run appears in
+# the repository's Actions tab, and on a pull request under "Checks", with a log of every step.
+#
+# The file is YAML, a format for settings:
+# - `key: value` sets a value. Indentation (two spaces per level) shows what belongs to what.
+# - A line starting with `- ` is one item of a list.
+# - `#` starts a comment, like this one: GitHub ignores it.
+# - `|` after a key keeps the indented lines below it as they are: a script of several lines.
+#   `>-` joins the indented lines below it into one long line.
+#
+# The words used below:
+# - run: one execution of this workflow (one line in the Actions tab).
+# - job: a group of steps that runs on one fresh computer. Jobs run at the same time, unless one
+#   says it `needs:` another; then it waits for that one to succeed.
+# - runner: that computer, a virtual machine GitHub creates for the job and deletes afterwards.
+#   `ubuntu-latest` is Linux, `macos-latest` is a Mac. Nothing is kept from one job to the next.
+# - step: one thing a job does, in order. Either a command (`run:`) or an action (`uses:`).
+#   If a step fails, the job stops there and is marked failed (red).
+# - action: a ready-made step that someone published on GitHub, like a plugin. `uses:` names it,
+#   `with:` gives it its settings. For example, `actions/checkout` downloads this repository.
+# - artifact: files a job uploads, so that later jobs (or people, from the run's page) can download
+#   them. Kept for 7 days here.
+# - cache: files kept between runs (downloads, compiled code), so the next run is faster.
+# - `${{ ... }}`: an expression. GitHub replaces it with a value before the step runs, such as
+#   `${{ matrix.os }}` (the system this copy of the job runs on) or `${{ runner.temp }}` (a
+#   temporary folder on the runner).
+#
+# Commands under `run:` are typed into bash, the command line of Linux and macOS, as if someone
+# typed them in a terminal. Each line is a program followed by its arguments: `cargo test
+# --workspace` runs the program `cargo` with the arguments `test` and `--workspace`. Options start
+# with `-` or `--`. A command that fails makes the step fail.
+#
+# ── What runs, and in what order ─────────────────────────────────────────────────────────────────
+#
 #   rust (Linux, macOS) ─────────────────────────────────┐
 #   wasm ─┬─ contract ───────────────────────────────────┤─▶ publish (version tag or manual run)
 #         ├─ web: check, lint, unit tests, smoke, site ───┤
-#         └─ browser: Chromium, Firefox, WebKit ──────────┘
-# `wasm` builds the WebAssembly package once; the three jobs after it download that same package.
+#         └─ browser: Chromium, Firefox (Linux); WebKit (macOS)
 #
-# Each action is pinned to the commit of a release (the comment names the release), so a moved or
-# compromised tag can't change what runs. Dependabot (`.github/dependabot.yml`) proposes updates.
+# `rust` and `wasm` start at once. `wasm` builds the WebAssembly package (the Rust engine compiled
+# for the browser) once; `contract`, `web` and `browser` download that same package. `publish` waits
+# for everything else and runs only for a version tag or a manual run.
+#
+# Each action is pinned to the exact commit of one of its releases (the long hexadecimal number
+# after `@`; the comment beside it names the release), so nobody can change what runs here by
+# moving a tag. Dependabot (`.github/dependabot.yml`) proposes updates once a week.
 
+# The workflow's name in the Actions tab.
 name: CI
 
+# ── When it runs ─────────────────────────────────────────────────────────────────────────────────
 on:
+  # Every pull request: when it is opened or reopened, and whenever new commits are pushed to it.
+  # GitHub tests the result of merging the pull request into its target branch.
   pull_request:
+  # Pushes to `main` (merged pull requests included), and pushes of tags whose name starts with `v`.
   push:
     branches: [main]
     # A version tag, such as `v2.0.0`, publishes the site.
     tags: ['v*']
-  # A manual run from the Actions tab; on `main` or a version tag it also publishes.
+  # A "Run workflow" button in the Actions tab, to start a run by hand on a chosen branch or tag.
+  # On `main` or a version tag, it also publishes.
   workflow_dispatch:
 
-# The token every job gets: read-only, unless a job asks for more (only `publish` does).
+# ── What the jobs may do ─────────────────────────────────────────────────────────────────────────
+# Every job gets a temporary access token for this repository, valid only during the run. Here it
+# can only read, unless a job asks for more (only `publish` does).
 permissions:
   contents: read
 
-# One run per branch, tag or pull request at a time: a new push to a pull request cancels the run in
-# progress. Other runs are never cancelled, so no publish is cut short.
+# One run per branch, tag or pull request at a time. `github.ref` names the branch or tag, so runs
+# of the same one share a group. A new push to a pull request cancels the run still in progress
+# there (its result would be out of date anyway). Other runs are never cancelled, so no publish is
+# cut short.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Environment variables: named values every command in every job can read.
 env:
+  # Colored output from `cargo` (Rust's build tool), which makes the logs easier to read.
   CARGO_TERM_COLOR: always
-  # `npm ci` runs the `prepare` script, which installs the Git hooks; CI doesn't need them.
+  # `npm ci` runs the web app's `prepare` script, which installs the Git hooks (checks before each
+  # commit, for people working on their own computer); CI doesn't commit, so this turns it off.
   HUSKY: '0'
 
 jobs:
   # ── Rust: formatting, lints and every native test, including the golden set ──────────────────
+  # The Rust code checked and tested as a normal program on the runner's own system ("native"),
+  # once on Linux and once on macOS.
   rust:
+    # The name shown in the Actions tab and on pull requests; `matrix.os` is filled in per copy.
     name: Rust (${{ matrix.os }})
     strategy:
       # Finish both systems even if one fails, to see whether a failure is system-specific.
       fail-fast: false
+      # A matrix runs one copy of this job for each value: here one on Linux, one on macOS.
       matrix:
-        # macOS (arm64) is where the golden outputs are made; Linux (x86_64) decodes JPEG with
-        # different CPU instructions, so both run until it's known whether they agree.
+        # Both, always: macOS (arm64), where the golden outputs are made, and Linux (x86_64), which
+        # decodes JPEG with different CPU instructions.
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    # Every command in this job runs inside the `rust/` folder (where `Cargo.toml` is).
     defaults:
       run:
         working-directory: rust
     steps:
+      # Downloads this repository onto the runner (at the commit being tested).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # Reads `rust-toolchain.toml`: the toolchain, the wasm32 target, clippy and rustfmt.
+      # `rustup` is Rust's installer. It reads `rust/rust-toolchain.toml` and installs what that
+      # file lists: the Rust version, the WebAssembly target, clippy and rustfmt.
       - name: Install the Rust toolchain
         run: rustup toolchain install
+      # Keeps the downloaded crates (Rust libraries) and the compiled code between runs, so later
+      # runs don't compile everything again. `workspaces` says where the Rust project is.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: rust
+      # `cargo fmt` is the formatter; `--check` only reports code that isn't formatted (and fails),
+      # it changes nothing. Locally, `cargo fmt --all` fixes it.
       - name: Formatting
         run: cargo fmt --all --check
+      # Clippy is Rust's linter: it points out likely mistakes and unclear code. `--workspace
+      # --all-targets` covers every crate, including tests and examples; `-D warnings` turns every
+      # warning into an error, so any finding fails the step.
       - name: Clippy (native)
         run: cargo clippy --workspace --all-targets -- -D warnings
+      # The same for the WebAssembly build of the browser crate (`--target wasm32-unknown-unknown`),
+      # which compiles some code that the native build doesn't. (`>-` joins the two lines below
+      # into one command.)
       - name: Clippy (wasm32)
         run: >-
           cargo clippy -p rekolor-wasm --target wasm32-unknown-unknown --all-targets
           -- -D warnings
-      # The color math must come from `libm` (identical on every target), never from `std`.
+      # The color math must come from `libm` (identical on every system), never from `std` (which
+      # can differ slightly between systems), so the CLI and the browser compute the same colors.
+      # `cargo tree` lists which library features are switched on, and why; the script fails if
+      # `palette` has `std` or lacks `libm`, for the native build and for WebAssembly.
       - name: palette uses libm, not std
         run: |
+          # Twice: once with no extra option (native), once with the WebAssembly target.
           for target in "" "--target wasm32-unknown-unknown"; do
+            # `$( ... )` runs the command and keeps its printed output in the variable `tree`.
             tree=$(cargo tree -e features -i palette_math $target)
+            # `grep -q` searches the text it is given (here `<<<"$tree"`) and only says whether it
+            # found the words; `!` means "if not found".
             if ! grep -q 'palette feature "libm"' <<<"$tree"; then
+              # A line starting with `::error::` is shown by GitHub as a red error annotation.
+              # `exit 1` stops the script with a failure.
               echo "::error::palette is built without libm ($target)"; exit 1
             fi
             if grep -q 'palette feature "std"' <<<"$tree"; then
               echo "::error::palette is built with std ($target)"; exit 1
             fi
           done
+      # Every Rust test of every crate, in a debug build (quick to compile, with extra checks).
       - name: Tests (debug)
         run: cargo test --workspace
-      # The shipped code is a release build, so the ΔE fingerprint runs in release too.
+      # The same tests in a release build (optimized, as the app ships), which can round numbers
+      # differently; the ΔE fingerprint must hold there too.
       - name: Tests (release)
         run: cargo test --workspace --release
-      # On a mismatch, the test writes diff images to `$TMPDIR/rekolor-golden-diff/`.
+      # The golden set: recolors every sample image with its config and compares the result with
+      # the stored `*-out-<size>.png` files. It is marked `ignored` (slow), and `-- --ignored` runs
+      # it. On a mismatch, the test writes diff images to `$TMPDIR/rekolor-golden-diff/`; `TMPDIR`
+      # (the system's temporary folder) is set to the runner's, so the next step knows where.
       - name: Golden set
         env:
           TMPDIR: ${{ runner.temp }}
         run: cargo test --release -p rekolor-cli --test golden -- --ignored
+      # Only when a step above failed (`if: failure()`): uploads the diff images as an artifact,
+      # to download from the run's page and see which pixels differ. `if-no-files-found: ignore`:
+      # no images (another step failed) is not an error.
       - name: Upload the golden diff images
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -102,6 +189,8 @@ jobs:
           retention-days: 7
 
   # ── WebAssembly: the tests inside WASM, then the package the web jobs use ──────────────────────
+  # WebAssembly (WASM) is how the Rust engine runs in a browser. This job runs the engine's tests
+  # compiled to WebAssembly, then builds the package the web app loads, and uploads it.
   wasm:
     name: WASM tests and package
     runs-on: ubuntu-latest
@@ -112,23 +201,32 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the Rust toolchain
         run: rustup toolchain install
+      # Its own cache (`key: wasm`), separate from the `rust` job's: it compiles different code.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: rust
           key: wasm
-      # `wasm-pack test --node` runs the tests in Node.js.
+      # Installs Node.js (which runs JavaScript outside a browser), version 24: `wasm-pack test
+      # --node` runs the WebAssembly tests in it.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      # Installs `wasm-pack` 0.15.0, the tool that compiles Rust to WebAssembly and wraps it in a
+      # package JavaScript can import (this action downloads a ready-made copy, which is quick).
       - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: wasm-pack@0.15.0
+      # The browser crate's tests (`crates/wasm/tests/`), compiled to WebAssembly and run in
+      # Node.js, in a debug build and then in a release build.
       - name: Tests inside WASM (debug)
         run: wasm-pack test --node crates/wasm
       - name: Tests inside WASM (release)
         run: wasm-pack test --node --release crates/wasm
+      # The package itself, built for the web (`--target web`), in `rust/crates/wasm/pkg/`.
       - name: Build the package
         run: wasm-pack build crates/wasm --release --target web
+      # Uploads the package as the `wasm-pkg` artifact. `if-no-files-found: error`: a missing
+      # package fails the job, since the jobs after this one need it.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: wasm-pkg
@@ -137,8 +235,11 @@ jobs:
           retention-days: 7
 
   # ── The package's TypeScript contract, as an app sees it ───────────────────────────────────────
+  # A small TypeScript project (`rust/crates/wasm/ts-test/`) that uses the package the way the web
+  # app does: it checks that the package's types and functions are what the app expects.
   contract:
     name: TypeScript contract test
+    # Waits for `wasm`, whose package it tests.
     needs: wasm
     runs-on: ubuntu-latest
     defaults:
@@ -146,18 +247,23 @@ jobs:
         working-directory: rust/crates/wasm/ts-test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # The package must exist before `npm ci`: `package.json` depends on `file:../pkg`.
+      # Downloads the package `wasm` built, to where a local build would put it. It must be there
+      # before `npm ci`: `package.json` refers to it as `file:../pkg`.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: wasm-pkg
           path: rust/crates/wasm/pkg
+      # Node.js 24 with npm (its package manager). `cache: npm` keeps the downloaded packages
+      # between runs; the lock file (the exact package versions) decides when that cache is stale.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: rust/crates/wasm/ts-test/package-lock.json
+      # Installs exactly the package versions listed in `package-lock.json` (into `node_modules/`).
       - run: npm ci
-      # `tsc --noEmit` against the generated `.d.ts`, then Vitest.
+      # Runs the `test` script of `package.json`: the TypeScript compiler checks the types against
+      # the package's generated `.d.ts` files (`tsc --noEmit`), then Vitest runs the tests.
       - run: npm test
 
   # ── The web app: types, lint, unit tests, and the production build behind the smoke test ───────
@@ -170,6 +276,7 @@ jobs:
         working-directory: typescript
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The web app imports the package from `rust/crates/wasm/pkg`.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: wasm-pkg
@@ -180,16 +287,23 @@ jobs:
           cache: npm
           cache-dependency-path: typescript/package-lock.json
       - run: npm ci
+      # The scripts of `typescript/package.json`, one per step, so the log shows which one failed:
+      # `check` checks the types (svelte-check), `lint` checks the code style (ESLint and Prettier),
+      # `test` runs the unit tests in Node.js (Vitest).
       - run: npm run check
       - run: npm run lint
       - run: npm test
+      # Playwright drives real browsers from a script. `npx` runs a tool installed by `npm ci`.
+      # This downloads Chromium; `--with-deps` also installs the Linux system libraries it needs.
       - name: Install Chromium for the smoke test
         run: npx playwright install --with-deps chromium
-      # Builds `dist/` for GitHub Pages (base `/reKolor/`), serves it and drives it in Chromium.
+      # Builds the app for GitHub Pages into `typescript/dist/` (where every link starts with
+      # `/reKolor/`, as on the real site), serves it, opens it in Chromium, opens a sample image and
+      # picks a color. It fails on any error the page reports or file it can't load.
       - name: Smoke test
         run: npm run smoke
-      # The files the smoke test just checked are the ones that get published; any run's build can
-      # also be downloaded from its summary page.
+      # Uploads `dist/` as the `site` artifact: the files the smoke test just checked are the ones
+      # `publish` puts online. Anyone can also download a run's build from its summary page.
       - name: Keep the site
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -199,13 +313,36 @@ jobs:
           retention-days: 7
 
   # ── The app end to end in three browser engines ────────────────────────────────────────────────
+  # The browser tests (`typescript/tests/browser/`) open the real app in real browsers and use it.
+  # Two copies of this job: Chromium and Firefox on Linux, WebKit (Safari's engine) on macOS.
   browser:
-    name: Browser tests
+    name: Browser tests (${{ matrix.name }})
     needs: wasm
-    runs-on: ubuntu-latest
+    strategy:
+      # Finish both even if one fails, to see whether a failure is engine-specific.
+      fail-fast: false
+      # `include` lists the copies one by one, each with its own values; the steps below read them
+      # as `matrix.name`, `matrix.os`, `matrix.browsers` and `matrix.cache`.
+      matrix:
+        include:
+          - name: Chromium and Firefox, Linux
+            os: ubuntu-latest
+            browsers: chromium firefox
+            # Where Playwright keeps its browsers on this system.
+            cache: ~/.cache/ms-playwright
+          # WebKit on macOS, the one Safari users have: WebKit on Linux is a different port, with
+          # its own image decoders (it ignores the orientation stored in a PNG, for one).
+          - name: WebKit, macOS
+            os: macos-latest
+            browsers: webkit
+            cache: ~/Library/Caches/ms-playwright
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: typescript
+    # The copy's browsers as an environment variable, `$BROWSERS`, for the commands below.
+    env:
+      BROWSERS: ${{ matrix.browsers }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -218,20 +355,36 @@ jobs:
           cache: npm
           cache-dependency-path: typescript/package-lock.json
       - run: npm ci
+      # Keeps the downloaded browsers between runs (they are large). The `key` names what is in
+      # the cache: the system, the browsers, and a fingerprint of the lock file (`hashFiles`), so a
+      # new Playwright version, which needs new browsers, starts a new cache.
       - name: Cache the Playwright browsers
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('typescript/package-lock.json') }}
-      # Downloads the browsers unless cached, and always installs their system libraries.
-      - name: Install Chromium, Firefox and WebKit
-        run: npx playwright install --with-deps chromium firefox webkit
-      - run: npm run test:browser
+          path: ${{ matrix.cache }}
+          key: playwright-${{ runner.os }}-${{ matrix.browsers }}-${{ hashFiles('typescript/package-lock.json') }}
+      # Downloads the browsers unless cached. On Linux it also installs their system libraries
+      # (`--with-deps`); macOS needs none. The `${{ ... && ... || ... }}` expression is an
+      # if-else: `--with-deps` on Linux, nothing otherwise.
+      - name: Install ${{ matrix.browsers }}
+        run: npx playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} $BROWSERS
+      # `npm run test:browser` runs every engine; each engine is its own Vitest project,
+      # `browser (<engine>)`, so only this job's engines are selected.
+      - name: Browser tests
+        run: |
+          # An empty list, then one `--project "browser (<engine>)"` per engine in `$BROWSERS`.
+          projects=()
+          for browser in $BROWSERS; do projects+=(--project "browser ($browser)"); done
+          # Runs Vitest once, with that list as its options.
+          npx vitest run "${projects[@]}"
+      # Only when a step above failed: uploads the screenshots Vitest takes of a failing test
+      # (`typescript/.vitest/`). The folder's name starts with a dot, which makes it "hidden",
+      # and hidden files are left out unless `include-hidden-files` says otherwise.
       - name: Upload failure screenshots
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: browser-test-failures
+          name: browser-test-failures-${{ matrix.os }}
           path: typescript/.vitest
           include-hidden-files: true
           if-no-files-found: ignore
@@ -243,11 +396,19 @@ jobs:
   # build for a push made with the workflow's own token, so the job then requests one and waits for
   # it. If GitHub ever refuses that request, push with a deploy key instead: an SSH key with write
   # access to this repository, given to `actions/checkout` as `ssh-key`; its push starts the build.
+  #
+  # To publish: push a tag such as `v2.0.0` (`git tag v2.0.0`, then `git push origin v2.0.0`), or
+  # use "Run workflow" in the Actions tab on `main`. Running it on an older tag publishes that
+  # older version again.
   publish:
     name: Publish to GitHub Pages
+    # Runs only if this is true; otherwise the job shows as skipped. `github.ref` is what the run is
+    # for: `refs/tags/<tag>` or `refs/heads/<branch>`. So: a tag starting with `v`, or a manual
+    # run (`workflow_dispatch`) on `main`. `||` means "or", `&&` means "and".
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    # Waits for all the other jobs, and runs only if all of them succeeded.
     needs: [rust, contract, web, browser]
     runs-on: ubuntu-latest
     # Only this job may write: `contents` to push `releases`, `pages` to request the build.
@@ -258,48 +419,69 @@ jobs:
     concurrency:
       group: publish
       cancel-in-progress: false
+    # `gh`, GitHub's command-line tool, reads its access token from `GH_TOKEN`: the job's token.
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      # Downloads the `releases` branch (not the code) into a `releases/` folder.
       - name: Check out the releases branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: releases
           path: releases
+      # Downloads the site `web` built and tested into a `site/` folder.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: site
           path: site
       # Replaces every file, so nothing from an older version stays behind. Without a change (the
-      # same build published again), there is nothing to commit.
+      # same build published again), there is nothing to commit. `id: commit` lets the next step
+      # read this step's output (`steps.commit.outputs.sha`).
       - name: Commit the site to the releases branch
         id: commit
         working-directory: releases
         run: |
+          # Removes every file Git tracks on the branch (`-r`: in all folders; `-q`: quietly).
           git rm -rq --ignore-unmatch .
+          # Copies everything in `site/` here (`-R`: folders too; `/.` includes hidden files).
           cp -R ../site/. .
-          # Publish the files as they are, without GitHub's Jekyll processing.
+          # Publish the files as they are, without GitHub's Jekyll processing: an empty file
+          # named `.nojekyll` tells Pages so.
           touch .nojekyll
+          # Stages every change (new, changed and deleted files) for the commit.
           git add -A
+          # `git diff --cached --quiet` succeeds only when nothing is staged: the same site again.
           if git diff --cached --quiet; then
             echo 'The site is unchanged: nothing to commit.'
           else
+            # Commits as GitHub's bot (`-c` sets the name and email for this command only). The
+            # message names the tag or branch and the first 7 characters of the commit built.
+            # A `\` at the end of a line continues the command on the next line.
             git -c user.name='github-actions[bot]' \
               -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
               commit -q -m "Publish $GITHUB_REF_NAME (${GITHUB_SHA::7})"
+            # Sends the new commit to GitHub, onto the `releases` branch.
             git push -q origin HEAD:releases
           fi
+          # Hands the branch's latest commit to the next step: GitHub reads `name=value` lines
+          # added (`>>`) to the file named in `$GITHUB_OUTPUT` as this step's outputs.
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      # Waits for GitHub to report the build of that commit: done, failed, or still missing after
-      # 10 minutes (a build usually takes under a minute).
+      # Asks GitHub to build the site from `releases`, then waits for GitHub to report the build of
+      # that commit: done, failed, or still missing after 10 minutes (a build usually takes under a
+      # minute).
       - name: Build GitHub Pages and wait for it
         env:
           COMMIT: ${{ steps.commit.outputs.sha }}
         run: |
+          # `gh api` calls GitHub's web API. `--method POST .../pages/builds` requests a build;
+          # `> /dev/null` throws away what it prints. If the request fails, stop with an error.
           if ! gh api --method POST "repos/$GITHUB_REPOSITORY/pages/builds" > /dev/null; then
             echo "::error::GitHub refused the Pages build request. The releases branch has the new site ($COMMIT), but the live site is unchanged; see the comment on this job."
             exit 1
           fi
+          # Up to 60 times (`seq 60` counts 1 to 60), every 10 seconds: ask for the latest build
+          # and compare its commit and status (`--jq` picks the two fields out of the answer).
+          # `case` compares the answer with each pattern; `exit 0` ends with success.
           for _ in $(seq 60); do
             sleep 10
             case "$(gh api "repos/$GITHUB_REPOSITORY/pages/builds/latest" --jq '"\(.commit) \(.status)"')" in
