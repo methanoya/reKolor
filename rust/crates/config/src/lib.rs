@@ -260,11 +260,12 @@ impl PaletteConfig {
     // (one pick per line), which keeps diffs of the golden configs small and readable. `format!`
     // builds a `String` like `println!` prints; `{r}` inserts the variable `r`, and `{{`/`}}` are
     // literal braces.
-    /// Writes the config in the simple format: each header line as a `# ` comment, the material
-    /// (white too), the unprinted colors (none too), then the sections in order.
+    /// Writes the config in the simple format: each header line as a `# ` comment (see
+    /// `comment`), the material (white too), the unprinted colors (none too), then the sections in
+    /// order.
     pub fn to_toml(&self, header: &[&str]) -> String {
         // Collecting an iterator of `String`s into one `String` concatenates them.
-        let mut out: String = header.iter().map(|line| format!("# {line}\n")).collect();
+        let mut out: String = header.iter().map(|line| comment(line)).collect();
         let [r, g, b] = self.material;
         out.push_str(&format!("\nmaterial = [{r}, {g}, {b}]\n"));
         if self.unprinted.is_empty() {
@@ -303,6 +304,31 @@ impl PaletteConfig {
         }
         out
     }
+}
+
+// A header line can hold text from outside, such as the image's file name in the web app's export.
+// A line break in it would end the comment and leave the rest as (invalid) TOML, and TOML allows
+// no other control character in a comment except tab.
+/// `line` as TOML comment lines: each line break in it (`\n` or `\r\n`) starts another `# ` line,
+/// and every other control character except tab becomes U+FFFD (�).
+fn comment(line: &str) -> String {
+    line.split('\n')
+        .map(|part| {
+            let text: String = part
+                .strip_suffix('\r')
+                .unwrap_or(part)
+                .chars()
+                .map(|c| {
+                    if c.is_control() && c != '\t' {
+                        '\u{FFFD}'
+                    } else {
+                        c
+                    }
+                })
+                .collect();
+            format!("# {text}\n")
+        })
+        .collect()
 }
 
 // Quotes an ink name for TOML: quotes, backslashes and control characters must be escaped.
@@ -442,6 +468,17 @@ mod tests {
              \x20 { rgba = [200, 40, 40, 255], delta_e = 12.5 },\n]\n\n[[palette]]\nsize = 3\n"
         ));
         assert!(text.contains("  { rgba = [210, 120, 40, 255], ink = \"Pantone 1595\" },\n"));
+        assert_eq!(PaletteConfig::parse(&text).unwrap(), sample());
+    }
+
+    #[test]
+    fn header_lines_stay_comments_whatever_they_contain() {
+        // The web app's header includes the image's file name, which may contain line breaks and
+        // control characters (TOML allows neither in a comment, except tab).
+        let text = sample().to_toml(&["For a\nb\r\nc\rd\u{0}e\u{7f}f\tg.png.", ""]);
+        assert!(text.starts_with(
+            "# For a\n# b\n# c\u{FFFD}d\u{FFFD}e\u{FFFD}f\tg.png.\n# \n\nmaterial = "
+        ));
         assert_eq!(PaletteConfig::parse(&text).unwrap(), sample());
     }
 

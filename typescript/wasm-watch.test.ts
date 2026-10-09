@@ -63,4 +63,32 @@ describe('the WASM build lock', () => {
     expect(tryLock(file)).toBeUndefined();
     expect(fs.existsSync(file)).toBe(true);
   });
+
+  test('a stale lock is left alone while another dev server is breaking it', () => {
+    const { pid } = spawnSync(process.execPath, ['-e', '']);
+    lockAs(`${pid} killed`);
+    // The other dev server holds the breaker: it removes the stale lock, then may take a new one,
+    // which this one must not remove on the strength of what it read before.
+    fs.writeFileSync(`${file}.break`, String(process.pid));
+    expect(tryLock(file)).toBeUndefined();
+    expect(fs.readFileSync(file, 'utf8')).toBe(`${pid} killed`);
+    // Once the breaker is released, this one breaks the stale lock itself, then takes it.
+    fs.rmSync(`${file}.break`);
+    expect(tryLock(file)).toBeUndefined();
+    expect(fs.existsSync(`${file}.break`)).toBe(false);
+    expect(tryLock(file)).toBeDefined();
+  });
+
+  test('a breaker left by a dev server killed while breaking is cleared', () => {
+    const { pid } = spawnSync(process.execPath, ['-e', '']);
+    lockAs(`${pid} killed`);
+    const breaker = `${file}.break`;
+    fs.writeFileSync(breaker, String(pid));
+    const minuteAgo = new Date(Date.now() - 60_000);
+    fs.utimesSync(breaker, minuteAgo, minuteAgo);
+    expect(tryLock(file)).toBeUndefined(); // clears the breaker
+    expect(fs.existsSync(breaker)).toBe(false);
+    expect(tryLock(file)).toBeUndefined(); // breaks the lock
+    expect(tryLock(file)).toBeDefined();
+  });
 });
