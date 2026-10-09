@@ -35,19 +35,26 @@ export interface ImageSize {
   height: number;
 }
 
+// The WASM package's outcome as the app's outcome type (the same shape; the app's error kinds are a
+// superset).
 const fromWasm = <T>(outcome: Outcome<T>): AppOutcome<T> =>
   outcome.status === 'ok' ? ok(outcome.value) : { status: 'error', error: outcome.error };
 
+// The WASM objects live in WASM memory, which JavaScript's garbage collector doesn't see; each is
+// released with `free()` when it is replaced or the engine is disposed.
 export class Engine {
   #palette: Palette;
   #image: SourceImage | undefined;
 
+  // `private constructor`: the only way to get an engine is `Engine.create`, which can report an
+  // error (a constructor can't return one).
   private constructor(palette: Palette) {
     this.#palette = palette;
   }
 
   /** Creates the engine from the palette JSON (`palettes/pantone.json` format, file order kept). */
   static create(paletteJson: string): AppOutcome<Engine> {
+    // `data`'s type is inferred from the assignment in `try`.
     let data;
     try {
       data = parsePaletteJson(paletteJson);
@@ -65,6 +72,7 @@ export class Engine {
   }
 
   get image(): ImageSize | undefined {
+    // `a && b` gives `a` if it is falsy (here `undefined`), otherwise `b`.
     return this.#image && { width: this.#image.width, height: this.#image.height };
   }
 
@@ -77,6 +85,7 @@ export class Engine {
     if (tooLarge) return err('imageTooLarge', tooLarge);
     const created = SourceImage.create(rgba, width, height);
     if (created.status === 'error') return { status: 'error', error: created.error };
+    // `?.` calls `free()` only if there is an image.
     this.#image?.free();
     this.#image = created.value;
     return ok({ width, height });
@@ -121,6 +130,7 @@ export class Engine {
     return fromWasm(composite(pixel, material));
   }
 
+  // `k: number = ALTERNATIVES` is a default parameter value, used when `k` is omitted.
   /** The palette entries nearest to a color, nearest first (ties: file order). */
   nearest(color: Rgb, k: number = ALTERNATIVES): AppOutcome<PaletteMatch[]> {
     const outcome = fromWasm(this.#palette.nearest(color, k));
@@ -156,8 +166,9 @@ export class Engine {
   }
 
   /**
-   * Recolors the current image on the material into a new opaque RGBA buffer (transferable to the
-   * main thread). Pixels within a material range take no ink and are transparent.
+   * Recolors the current image on the material into a new RGBA buffer (transferable to the main
+   * thread). Pixels are opaque, except those within a material range: they take no ink and are
+   * transparent.
    */
   recolor(
     mappings: Mapping[],
@@ -165,6 +176,7 @@ export class Engine {
     materialRanges: MaterialRange[] = [],
   ): AppOutcome<Uint8Array<ArrayBuffer>> {
     if (!this.#image) return err('noImage', 'no image is open');
+    // The WASM `recolor` writes straight into this buffer (4 bytes per pixel).
     const out = new Uint8Array(this.#image.width * this.#image.height * 4);
     const outcome = fromWasm(this.#image.recolor({ mappings, material, materialRanges }, out));
     return outcome.status === 'ok' ? ok(out) : outcome;

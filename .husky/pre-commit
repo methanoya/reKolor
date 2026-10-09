@@ -1,5 +1,9 @@
 #!/usr/bin/env sh
+# Git hook for husky: Git runs it before each commit when `core.hooksPath` points to `.husky/`.
+# This line loads husky's helper script from `.husky/_/`, which husky creates on install.
 . "$(dirname -- "$0")/_/husky.sh"
 
 echo running husky pre-commit
+# Run the web app's `pre-commit` npm script, then re-stage the tracked files it changed (for
+# example, reformatted ones).
 cd typescript && npm run pre-commit && git add --update .

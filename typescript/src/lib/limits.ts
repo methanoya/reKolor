@@ -1,5 +1,8 @@
 // Resource limits: checked before any pixel buffer is allocated.
 
+// `as const` makes the object read-only to TypeScript and keeps each value's exact type; the
+// object itself can still be changed at runtime (unlike `Object.freeze`, see `picks.ts`). `_` in a
+// number literal (`16_384`) is only a digit separator.
 export const LIMITS = {
   /** Encoded image file size. */
   fileBytes: 50 * 1024 * 1024,
@@ -15,6 +18,8 @@ export const LIMITS = {
 
 /** Why an image of this size is refused, or `undefined` if it's within the limits. */
 export function imageLimitError(width: number, height: number): string | undefined {
+  // Written as `!(a > 0 && …)` rather than `a <= 0 || …` so `NaN` is refused too (every comparison
+  // with `NaN` is false). The backtick strings are template literals: `${...}` inserts a value.
   if (!(width > 0 && height > 0)) return `the image is empty (${width}×${height})`;
   if (width > LIMITS.side || height > LIMITS.side) {
     return `the image is ${width}×${height}; each side can be at most ${LIMITS.side} pixels`;

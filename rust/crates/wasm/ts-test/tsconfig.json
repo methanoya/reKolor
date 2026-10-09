@@ -1,14 +1,24 @@
+// TypeScript compiler settings for the contract test. TypeScript reads this file as JSON with
+// comments. `npm test` runs `tsc --noEmit` first: it type-checks every test file against the
+// generated `rekolor-wasm` declarations (`.d.ts`) without producing any output files.
 {
   "compilerOptions": {
+    // The JavaScript version to check against, and modern ES modules (`import`/`export`).
     "target": "ES2022",
     "module": "ESNext",
+    // Resolve imports the way Vite and other bundlers do (honoring each package's `exports` map).
     "moduleResolution": "bundler",
+    // Built-in APIs the code may use: modern JavaScript, `Symbol.dispose` (which the generated
+    // classes implement), and browser types such as `ImageData`. `types` adds Node.js's own APIs.
     "lib": ["ES2022", "ESNext.Disposable", "DOM"],
     "types": ["node"],
+    // The strictest checks: `strict` (no implicit `any`, null checks, …), indexing an array may
+    // return `undefined`, and an optional field may be missing but not explicitly `undefined`.
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "noEmit": true,
+    // Also check the packages' own `.d.ts` files, including the generated one under test.
     "skipLibCheck": false
   },
   "include": ["test/**/*.ts"]

@@ -1,9 +1,12 @@
+// Unit tests for `engine.ts` (see `palette.test.ts` for how these test files work), against the
+// real WASM package, loaded from disk once before all tests (`beforeAll`).
 import { readFile } from 'node:fs/promises';
 import { beforeAll, describe, expect, test } from 'vitest';
 import { ALTERNATIVES, Engine } from './engine';
 import type { AppOutcome } from './outcome';
 import { loadWasm, pantoneJson } from './test-wasm';
 
+// The value of an ok outcome; an error outcome fails the test with its message.
 const value = <T>(outcome: AppOutcome<T>): T => {
   if (outcome.status === 'error')
     throw new Error(`${outcome.error.kind}: ${outcome.error.message}`);

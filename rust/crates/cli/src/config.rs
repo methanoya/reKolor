@@ -6,10 +6,12 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+// Re-export the shared config types, so the CLI's code can write `config::PaletteConfig`.
 pub use rekolor_config::{
     ConfigError, ConfigPick, DEFAULT_UNPRINTED_DELTA_E, PaletteConfig, SizedPalette, Unprinted,
 };
 
+// The golden-set layout: for `foo/bar.png`, the config and the outputs sit next to the image.
 /// `foo/bar.png` → `foo/bar.palettes.toml`.
 pub fn config_path(image: &Path) -> PathBuf {
     image.with_file_name(format!("{}.palettes.toml", stem(image)))
@@ -20,6 +22,8 @@ pub fn output_path(image: &Path, size: u32) -> PathBuf {
     image.with_file_name(format!("{}-out-{size}.png", stem(image)))
 }
 
+// The file name without its extension (`bar` for `foo/bar.png`). `to_string_lossy` turns a
+// file name that isn't valid UTF-8 into text with replacement characters instead of failing.
 fn stem(path: &Path) -> String {
     path.file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -33,6 +37,8 @@ pub fn load(path: &Path) -> Result<PaletteConfig> {
     PaletteConfig::parse(&text).with_context(|| format!("parsing {}", path.display()))
 }
 
+// `rsplit_once('.')` splits at the last dot; `map_or` falls back to the whole name if there is
+// none.
 /// The config as written next to a golden image, with its explanatory header.
 pub fn golden_toml(config: &PaletteConfig, image_name: &str, generated_by: &str) -> String {
     let stem = image_name
@@ -45,6 +51,7 @@ pub fn golden_toml(config: &PaletteConfig, image_name: &str, generated_by: &str)
     ])
 }
 
+// Unit tests, run with `cargo test -p rekolor-cli`.
 #[cfg(test)]
 mod tests {
     use super::*;

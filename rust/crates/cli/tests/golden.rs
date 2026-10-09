@@ -8,6 +8,9 @@
 //! (differing pixels in magenta over a faded copy of the expected image) is written to
 //! `<temp dir>/rekolor-golden-diff/`.
 
+// An integration test that uses the CLI's library half (`rekolor_cli`) directly, not the binary.
+// The golden set lives in the repository's `samples/` folder: for each image, a palette config and
+// one reviewed output PNG per palette size.
 use std::path::{Path, PathBuf};
 
 use rekolor_cli::config;
@@ -46,6 +49,7 @@ fn compare(label: &str, width: u32, height: u32, expected: &[u8], actual: &[u8])
         .0
         .iter()
         .flat_map(|p| {
+            // Three quarters of the way to white, so the magenta differences stand out.
             let fade = |c: u8| ((u16::from(c) + 3 * 255) / 4) as u8;
             [fade(p[0]), fade(p[1]), fade(p[2]), 255]
         })
@@ -55,6 +59,7 @@ fn compare(label: &str, width: u32, height: u32, expected: &[u8], actual: &[u8])
     }
     let dir = std::env::temp_dir().join("rekolor-golden-diff");
     std::fs::create_dir_all(&dir).expect("create diff dir");
+    // The label contains `/` and spaces (`sub/name.png size 3`); replace them to get a file name.
     let diff_path = dir.join(format!("{}.diff.png", label.replace(['/', ' '], "_")));
     rekolor_io::write_png(&diff_path, &diff, width, height).expect("write diff image");
 
@@ -67,6 +72,7 @@ fn compare(label: &str, width: u32, height: u32, expected: &[u8], actual: &[u8])
     ))
 }
 
+// `#[ignore]` skips this test in a plain `cargo test`; `-- --ignored` runs only ignored tests.
 #[test]
 #[ignore = "golden set: run with `cargo test --release -p rekolor-cli --test golden -- --ignored`"]
 fn every_sample_matches_its_reviewed_golden_outputs() {
@@ -79,6 +85,8 @@ fn every_sample_matches_its_reviewed_golden_outputs() {
     for input in discover::images(&samples).unwrap() {
         let name = input.strip_prefix(&samples).unwrap().display().to_string();
         let config_path = config::config_path(&input);
+        // Record a broken config as a failure and continue with the next image (`continue`), so one
+        // run lists every problem.
         let config = match config::load(&config_path) {
             Ok(config) => config,
             Err(e) => {

@@ -1,5 +1,12 @@
 //! TypeScript-facing data types and their conversions to and from core types.
 
+// Every type here exists twice: the core type (`core::Rgb8`, …) used by the engine, and a mirror
+// type here that serde can serialize and tsify can describe to TypeScript. The `From`
+// implementations at the bottom convert between the two.
+//
+// `Serialize`/`Deserialize` (serde) convert a value to and from a JavaScript object; `Tsify`
+// generates the matching TypeScript type in the package's `.d.ts`, so the web app's compiler checks
+// every call. `///` doc comments are copied into the `.d.ts` as well.
 use rekolor_core as core;
 use serde::{Deserialize, Serialize};
 use tsify::Tsify;
@@ -26,6 +33,7 @@ pub struct Mapping {
     pub ink: Rgb,
 }
 
+// `rename_all = "camelCase"` writes Rust's `delta_e` as `deltaE` in JavaScript.
 /// A color left unprinted: pixels within `deltaE` (CIEDE2000) of `pixel` composited over the
 /// material take no ink and are transparent in the output, so the material shows there.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Tsify)]
@@ -37,6 +45,8 @@ pub struct MaterialRange {
     pub delta_e: f32,
 }
 
+// `#[tsify(optional)]` makes the field optional in TypeScript (`materialRanges?:`), and
+// `#[serde(default)]` reads a missing field as an empty list.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Tsify)]
 pub struct RecolorRequest {
     pub mappings: Vec<Mapping>,
@@ -49,11 +59,13 @@ pub struct RecolorRequest {
     pub material_ranges: Vec<MaterialRange>,
 }
 
+// Counts are `f64` because JavaScript has a single number type (a 64-bit float); a Rust `u64`
+// would become a `BigInt` instead.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Tsify)]
 pub struct RecolorStats {
     /// Pixels whose composited color equals a mapping's source exactly.
     pub exact: f64,
-    /// All other pixels.
+    /// Pixels that took the nearest ink. Unprinted pixels are counted in neither field.
     pub nearest: f64,
 }
 
@@ -114,6 +126,8 @@ pub struct ColorMismatch {
     pub max_channel_difference: u8,
 }
 
+// `skip_serializing_if = "Option::is_none"` leaves `mismatch` out of the JS object entirely when
+// there is none (rather than `mismatch: null`).
 /// The result of picking a pixel.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Tsify)]
 pub struct Pick {
@@ -130,6 +144,8 @@ pub struct Pick {
     pub mismatch: Option<ColorMismatch>,
 }
 
+// Conversions between the mirror types and the core types. With `From` implemented, `.into()`
+// converts in either direction, as in `m.source.into()` below.
 impl From<Rgb> for core::Rgb8 {
     fn from(Rgb { r, g, b }: Rgb) -> Self {
         Self::new(r, g, b)
@@ -221,6 +237,7 @@ impl From<core::Pick<'_>> for Pick {
             pixel: p.pixel.into(),
             matching: p.matching.into(),
             suggestion: p.suggestion.into(),
+            // Converts the warning inside the `Option`, if there is one.
             mismatch: p.mismatch.map(Into::into),
         }
     }

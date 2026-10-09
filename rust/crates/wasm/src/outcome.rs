@@ -1,8 +1,14 @@
+// Errors cross into JavaScript as ordinary values (`Outcome`), not as thrown exceptions, so the
+// TypeScript compiler makes the web app handle both cases: it checks `status` before reading
+// `value`. A Rust panic is different: it means a bug and aborts the call.
 use rekolor_core as core;
 use serde::{Deserialize, Serialize};
 use tsify::{Ts, Tsify};
 use wasm_bindgen::prelude::*;
 
+// `tag = "status"` stores the variant's name in a `status` field (`"ok"` or `"error"`) next to its
+// own fields, which TypeScript understands as a "discriminated union". `<T>` makes the type
+// generic: `Outcome<Pick>`, `Outcome<RecolorStats>` and so on.
 /// The result of every call that can fail on input:
 /// `{ status: "ok", value }` or `{ status: "error", error }`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Tsify)]
@@ -12,6 +18,7 @@ pub enum Outcome<T> {
     Error { error: ErrorInfo },
 }
 
+// `kind` lets the app react to specific errors in code; `message` is the text for people.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Tsify)]
 pub struct ErrorInfo {
     pub kind: ErrorKind,
@@ -41,6 +48,8 @@ pub enum ErrorKind {
     TooManyMappings,
 }
 
+// Every core error becomes an `ErrorInfo` with a matching kind. The `_ =>` arm is required because
+// the core's error enum is `#[non_exhaustive]` (it may gain variants later).
 impl From<core::Error> for ErrorInfo {
     fn from(e: core::Error) -> Self {
         let kind = match e {
@@ -68,6 +77,7 @@ impl From<tsify::Error> for ErrorInfo {
     }
 }
 
+// Lets a function compute a normal Rust `Result` and turn it into an `Outcome` with `.into()`.
 impl<T> From<Result<T, ErrorInfo>> for Outcome<T> {
     fn from(result: Result<T, ErrorInfo>) -> Self {
         match result {
@@ -77,6 +87,8 @@ impl<T> From<Result<T, ErrorInfo>> for Outcome<T> {
     }
 }
 
+// `extern "C"` declares types that exist on the JavaScript side; `typescript_type` gives each the
+// TypeScript type the generated `.d.ts` should show.
 #[wasm_bindgen]
 extern "C" {
     // tsify names a generic type without its argument (`Outcome`), so each method returns one of
@@ -97,6 +109,9 @@ extern "C" {
     pub type RgbOutcome;
 }
 
+// `pub(crate)`: visible to the rest of this crate, not to JavaScript or other crates.
+// `T: Tsify + Serialize` requires `T` to implement both traits ("trait bounds").
+// `unchecked_into` re-labels the JS value as the declared outcome type without a runtime check.
 /// Converts an outcome to its TypeScript form, typed as `O` (one of the types above).
 pub(crate) fn outcome_js<T: Tsify + Serialize, O: JsCast>(outcome: Outcome<T>) -> O {
     to_ts(&outcome).js_value().unchecked_into()
@@ -142,6 +157,7 @@ pub(crate) fn error_object(error: &ErrorInfo) -> JsValue {
     object.into()
 }
 
+// `Reflect.set(object, key, value)` in JavaScript terms: `object[key] = value`.
 fn set(object: &js_sys::Object, key: &str, value: &JsValue) {
     // Setting a property on a fresh plain object can't fail.
     js_sys::Reflect::set(object, &key.into(), value).expect("set property on a plain object");

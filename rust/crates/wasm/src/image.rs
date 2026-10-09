@@ -1,3 +1,5 @@
+// The image the user opened, as a JavaScript class (`SourceImage`) backed by memory inside the
+// WASM module. JavaScript holds a handle to it; the pixels themselves stay on the Rust side.
 use rekolor_core as core;
 use tsify::Ts;
 use wasm_bindgen::prelude::*;
@@ -15,6 +17,9 @@ extern "C" {
     pub type SourceImageOutcome;
 }
 
+// `#[wasm_bindgen]` on a struct exports it as a JavaScript class. Its fields stay private; JS
+// reaches the data only through the methods below. The object lives in WASM memory until JS calls
+// its generated `free()` method (or it is garbage-collected).
 /// The source image kept on the WASM side: its pixels are copied in once and every later
 /// call works on them, so picks always read the real source pixel.
 #[wasm_bindgen]
@@ -25,8 +30,13 @@ pub struct SourceImage {
     rgba: Vec<u8>,
 }
 
+// Methods JavaScript can call: `image.recolor(...)`, `image.pick(...)`, and so on.
 #[wasm_bindgen]
 impl SourceImage {
+    // A static factory (`SourceImage.create(...)` in JS) rather than a constructor, because a
+    // constructor can't return an error value. `Vec<u8>` takes a copy of the JS `Uint8Array`. The
+    // sizes arrive as `f64` (a JS number) and are checked by `whole_u32`, since a plain `u32`
+    // parameter would silently accept `1.5` or `-1`.
     /// Copies an RGBA8 buffer (e.g. `imageData.data`) of `width × height × 4` bytes.
     /// `width` and `height` must be whole numbers from 0 to 2^32 − 1.
     pub fn create(rgba: Vec<u8>, width: f64, height: f64) -> SourceImageOutcome {
@@ -40,6 +50,8 @@ impl SourceImage {
         .unchecked_into()
     }
 
+    // `getter` exposes the method as a read-only property: `image.width` in JS, not
+    // `image.width()`.
     #[wasm_bindgen(getter)]
     pub fn width(&self) -> u32 {
         self.width
@@ -50,6 +62,8 @@ impl SourceImage {
         self.height
     }
 
+    // `Ts<Rgb>` is the JS object as received; `to_rust()` converts it and fails if its shape is
+    // wrong (missing field, out-of-range number), which becomes an `InvalidInput` outcome.
     /// Size and color counts, `colors` on the given material. Counting RGBA values needs memory
     /// per distinct value (hundreds of MB for a large noisy image); `colorCount` is the bounded
     /// alternative.
@@ -61,6 +75,7 @@ impl SourceImage {
         outcome_js(Outcome::from(outcome))
     }
 
+    // `js_name` sets the JavaScript name (camelCase) for the Rust method `color_count`.
     /// Distinct colors after compositing over the material (`ImageStats.colors`), with fixed
     /// memory (2 MiB) whatever the image.
     #[wasm_bindgen(js_name = colorCount)]
@@ -75,6 +90,9 @@ impl SourceImage {
         outcome_js(Outcome::from(outcome))
     }
 
+    // `out: &mut [u8]` is a temporary copy of the caller's `Uint8Array` in WASM memory:
+    // wasm-bindgen copies the array in, the function writes into the copy, and wasm-bindgen copies
+    // the result back into the caller's array when the call returns.
     /// Recolors the image into `out`, which must be `width × height × 4` bytes. To write
     /// straight into an `ImageData`, pass `new Uint8Array(imageData.data.buffer)`.
     ///
@@ -111,6 +129,8 @@ impl SourceImage {
                         ),
                     });
                 }
+                // Check each range's ΔE and convert it to the core type; the first invalid one ends
+                // the call.
                 let ranges = request
                     .material_ranges
                     .iter()
@@ -156,6 +176,9 @@ impl SourceImage {
         let outcome = whole_u32("x", x)
             .and_then(|x| Ok((x, whole_u32("y", y)?)))
             .and_then(|(x, y)| {
+                // `seen` is optional: `transpose` turns `Option<Result<..>>` into
+                // `Result<Option<..>>`, so `?` can report a malformed color while `None` stays
+                // `None`.
                 let seen = seen
                     .map(|s| s.to_rust())
                     .transpose()
@@ -175,6 +198,7 @@ impl SourceImage {
     }
 }
 
+// A free function rather than a method: JavaScript calls it as `composite(pixel, material)`.
 /// A pixel composited over the material: the color recolor matches (for picks without a position,
 /// e.g. imported ones, when the material changes).
 #[wasm_bindgen]
@@ -186,6 +210,8 @@ pub fn composite(pixel: Ts<Rgba>, material: Ts<Rgb>) -> RgbOutcome {
     outcome_js(Outcome::from(outcome))
 }
 
+// Rust-only methods: this second `impl` block has no `#[wasm_bindgen]`, so JavaScript never sees
+// it.
 impl SourceImage {
     /// Rust-side constructor (not exported); used by `create` and by tests.
     pub fn from_rgba(rgba: Vec<u8>, width: u32, height: u32) -> Result<SourceImage, ErrorInfo> {

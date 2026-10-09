@@ -1,6 +1,14 @@
-// End-to-end tests: the real app in each engine — open → pick → live recolor →
-// download — plus a config import.
+// End-to-end tests: the real app in each browser engine (open → pick → live recolor → download),
+// plus config import and export, moving picks, the ink dropdown, the material and the colors left
+// unprinted.
 
+// How these tests work (Vitest browser mode): `render(App)` mounts the real app on a test page in
+// a real browser, with the real worker and WASM engine. `screen.getByText(...)`,
+// `screen.getByRole(...)` and `screen.getByTestId(...)` find elements the way a user would see
+// them. `expect.element(...)` retries its check until it passes or times out, which absorbs the
+// asynchronous steps (worker calls, decoding, recoloring). `userEvent` performs clicks, uploads and
+// key presses as real input events; `commands` are the custom mouse commands from
+// `mouse.commands.ts` (`import type {}` from that file loads their type declarations).
 import { commands, page, userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
 import { afterEach, describe, expect, test, vi } from 'vitest';
@@ -9,8 +17,11 @@ import '../../src/app.css';
 import { fixtureFile } from './fixtures';
 import type {} from './mouse.commands';
 
+// Undo every `vi.spyOn` replacement after each test.
 afterEach(() => vi.restoreAllMocks());
 
+// `vi.spyOn(...).mockImplementation(...)` replaces `click()` on every link, so instead of saving
+// a file the test reads the downloaded data from the link's object URL.
 /** Captures the next download the app starts (it clicks a temporary <a download>). */
 function captureDownload(): Promise<{ name: string; blob: Blob }> {
   return new Promise((resolve) => {
@@ -53,6 +64,8 @@ describe('reKolor app', () => {
     await screen.getByTestId('download').click();
     const { name, blob } = await download;
     expect(name).toBe('opaque-rekolor.png');
+    // Check the PNG header: bytes 1–3 spell "PNG", and the width and height are 32-bit numbers at
+    // bytes 16 and 20.
     const head = new Uint8Array(await blob.slice(0, 24).arrayBuffer());
     expect(String.fromCharCode(...head.subarray(1, 4))).toBe('PNG');
     const view = new DataView(head.buffer);

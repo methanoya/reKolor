@@ -3,6 +3,9 @@
   // pans, the wheel zooms, a click (without dragging) picks the source pixel under the pointer, and
   // a Shift-drag that starts on a marker moves that pick.
 
+  // The component only reports what the user did (`onview`, `onpick`, `onmove`, …); the parent
+  // (`App.svelte`) decides what changes, and passes the new `view` and markers back in. The
+  // same component is used twice, for the original and for the result, sharing one `view`.
   import type { Rgba } from 'rekolor-wasm';
   import type { PickMove } from '../lib/picks';
   import {
@@ -16,6 +19,7 @@
     type View,
   } from '../lib/view';
 
+  // Inputs from the parent. Names ending in `?` are optional; the `on...` functions are callbacks.
   interface Props {
     label: string;
     bitmap: ImageBitmap | undefined;
@@ -38,6 +42,7 @@
     backdrop?: string | undefined;
   }
 
+  // Unpacks the props; `= []` gives a default when the parent leaves a prop out.
   let {
     label,
     bitmap,
@@ -56,13 +61,21 @@
   /** How far from a marker's center (CSS pixels) a Shift-drag still grabs it. */
   const GRAB_RADIUS = 10;
 
+  // Plain variables, filled with the DOM elements by `bind:this={...}` in the markup below.
   let frame: HTMLDivElement;
   let canvas: HTMLCanvasElement;
   /** The markers, drawn on their own canvas so the image canvas holds only image pixels. */
   let overlay: HTMLCanvasElement;
+  // `$state(...)` declares reactive state: assigning a new value updates everything that reads it
+  // (the template and any `$effect`). `size` is the frame's size in CSS pixels; `dpr` is the device
+  // pixel ratio (2 on most high-resolution screens), so the canvases can be sized in real device
+  // pixels and stay sharp.
   let size = $state<Size>({ width: 0, height: 0 });
   let dpr = $state(1);
 
+  // `$effect(fn)` runs `fn` after the component is on the page, and again whenever any reactive
+  // value it read has changed. A function it returns runs before the next run and when the
+  // component is removed (cleanup). This one watches the frame's size with a `ResizeObserver`.
   $effect(() => {
     const observer = new ResizeObserver(([entry]) => {
       if (!entry) return;
@@ -76,6 +89,8 @@
 
   // Redraw whenever the bitmap, view or size change.
   $effect(() => {
+    // The transform maps image pixels to device pixels: scale by `k`, then shift so the view's
+    // top-left image point (`view.x`, `view.y`) lands at the canvas corner.
     const context = canvas.getContext('2d');
     if (!context) return;
     canvas.width = Math.max(1, Math.round(size.width * dpr));
@@ -98,6 +113,7 @@
     overlay.height = Math.max(1, Math.round(size.height * dpr));
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (!bitmap) return;
+    // Each marker is drawn twice (thick dark, then thin white), so it shows on any color.
     const outline = () => {
       context.lineWidth = 3;
       context.strokeStyle = 'rgb(0 0 0 / 0.75)';
@@ -128,15 +144,20 @@
       const { px, py } = position(e);
       onview(zoomAt(view, Math.exp(-e.deltaY * 0.0015), px, py));
     };
+    // Added by hand rather than with an `onwheel` attribute, so it can be registered as non-passive
+    // (allowed to cancel scrolling).
     canvas.addEventListener('wheel', onWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', onWheel);
   });
 
+  // A pointer event's position relative to the canvas's top-left corner, in CSS pixels.
   const position = (e: { clientX: number; clientY: number }) => {
     const rect = canvas.getBoundingClientRect();
     return { px: e.clientX - rect.left, py: e.clientY - rect.top };
   };
 
+  // Gesture state. Plain `let` variables are not reactive (changing them doesn't redraw anything);
+  // `$state` is used only for what the template or an effect needs to see.
   let drag: { id: number; px: number; py: number; view: View; moved: boolean } | undefined;
 
   /** A pick being moved: its marker's id, the pointer that moves it, and the last pixel reported. */
@@ -172,6 +193,9 @@
     updateGrabbable();
   }
 
+  // Pointer events cover mouse, pen and touch alike. A press starts either a pick move (Shift on a
+  // marker) or a pan. `setPointerCapture` keeps this canvas receiving the pointer's events even
+  // when it leaves the canvas, until the button is released.
   function onpointerdown(e: PointerEvent) {
     // One gesture at a time: a second pointer can't replace or join the one in progress.
     if (moving || drag || !bitmap || e.button !== 0) return;
@@ -209,6 +233,7 @@
     const { px, py } = pointer;
     const dx = px - drag.px;
     const dy = py - drag.py;
+    // Movements under 4 pixels still count as a click, not a pan.
     if (!drag.moved && Math.hypot(dx, dy) < 4) return;
     drag.moved = true;
     onview(pan(drag.view, dx, dy));
@@ -268,15 +293,23 @@
       .getContext('2d')
       ?.getImageData(Math.floor(px * dpr), Math.floor(py * dpr), 1, 1).data;
     if (!data) return undefined;
+    // Unpack the pixel's four bytes; `= 0` is a fallback the compiler requires (indexing could be
+    // out of range in theory).
     const [r = 0, g = 0, b = 0, a = 0] = data;
     return { r, g, b, a };
   }
 </script>
 
+<!-- `<svelte:window>` attaches event handlers to the browser window (for the Shift and Escape
+     keys), and removes them when the component is removed. -->
 <svelte:window onkeydown={onkey} onkeyup={onkey} />
 
 <figure class="view">
   <figcaption>{label}</figcaption>
+  <!-- `class:name={condition}` adds the CSS class while the condition is true
+       (`class:grabbable` alone means `class:grabbable={grabbable}`). `{onpointerdown}` is short
+       for `onpointerdown={onpointerdown}`. `bind:this` stores the element in the variable of
+       that name. -->
   <div class="frame" class:empty={!bitmap} style:background={backdrop} bind:this={frame}>
     <canvas
       bind:this={canvas}
@@ -294,6 +327,8 @@
         grabbable = false;
       }}
     ></canvas>
+    <!-- The marker layer, on top of the image; it lets every pointer event through
+         (`pointer-events: none` below). -->
     <canvas bind:this={overlay} class="overlay" aria-hidden="true"></canvas>
     {#if !bitmap && placeholder}
       <p class="placeholder">{placeholder}</p>
@@ -313,6 +348,8 @@
     font-size: 0.9rem;
     color: var(--muted);
   }
+  /* The checkerboard shows through transparent pixels, unless the parent sets a material
+     color as the background (`backdrop`). */
   .frame {
     position: relative;
     height: min(62vh, 640px);
@@ -329,6 +366,8 @@
       height: 45vh;
     }
   }
+  /* Both canvases fill the frame. `touch-action: none` stops touch screens from scrolling or
+     zooming the page while the user drags on the image. */
   canvas {
     position: absolute;
     inset: 0;

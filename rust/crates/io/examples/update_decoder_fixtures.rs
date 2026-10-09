@@ -9,6 +9,8 @@
 //! generated deterministically, so an unchanged encoder and decoder rewrite identical files. Tests
 //! only read these files (`crates/io/tests/decoders.rs` checks they match a fresh decode).
 
+// A maintenance program in the crate's `examples/` folder (see the command above). `Write as _`
+// enables `writeln!` on a `String`.
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -54,6 +56,7 @@ fn main() {
     }
 }
 
+// Leave identical files untouched, so a rerun with nothing changed shows no `git diff`.
 fn write_if_changed(path: &Path, bytes: &[u8], changed: &mut Vec<String>) {
     if std::fs::read(path).ok().as_deref() != Some(bytes) {
         std::fs::write(path, bytes).unwrap();
@@ -61,6 +64,7 @@ fn write_if_changed(path: &Path, bytes: &[u8], changed: &mut Vec<String>) {
     }
 }
 
+// Each fixture is a (name, file name, encoded file bytes) tuple.
 /// (name, file name, encoded bytes)
 fn fixtures() -> Vec<(&'static str, String, Vec<u8>)> {
     vec![
@@ -113,6 +117,8 @@ fn png(rgba: &[u8], w: u32, h: u32, icc: Option<Vec<u8>>, exif: Option<Vec<u8>>)
     out
 }
 
+// JPEG has no alpha: drop every fourth byte. `flat_map` turns each 4-byte pixel into 3 bytes and
+// joins them into one list.
 fn jpeg(rgba: &[u8], w: u32, h: u32, exif: Vec<u8>) -> Vec<u8> {
     let rgb: Vec<u8> = rgba
         .as_chunks::<4>()
@@ -129,6 +135,7 @@ fn jpeg(rgba: &[u8], w: u32, h: u32, exif: Vec<u8>) -> Vec<u8> {
     out
 }
 
+// All pixels row by row, as one flat byte list (4 bytes per pixel).
 fn image(w: u32, h: u32, f: impl Fn(u32, u32) -> [u8; 4]) -> Vec<u8> {
     (0..h)
         .flat_map(|y| (0..w).map(move |x| (x, y)))
@@ -150,6 +157,8 @@ fn gradient(w: u32, h: u32) -> Vec<u8> {
 /// Four distinct quadrants plus a fine pattern, so any rotation or flip is detected exactly.
 fn quadrants(w: u32, h: u32) -> Vec<u8> {
     image(w, h, |x, y| {
+        // Pick the quadrant's color: bit 1 is "bottom half", bit 0 is "right half". The XOR (`^`)
+        // with the position adds a fine pattern on top.
         let q = [[255, 0, 0], [0, 200, 0], [0, 0, 255], [240, 220, 0]]
             [(usize::from(y >= h / 2) << 1) | usize::from(x >= w / 2)];
         [q[0] ^ (x as u8 * 3), q[1] ^ (y as u8 * 5), q[2], 255]
@@ -196,9 +205,13 @@ fn exif_orientation(value: u16) -> Vec<u8> {
     exif
 }
 
+// Builds the ICC profile byte by byte: a 128-byte header, a tag table (signature, offset, size
+// per tag), then the tag data, each tag padded to 4 bytes. `fn` items inside a function are
+// private helpers; `[a, b, c].concat()` joins byte slices into one `Vec`.
 /// An ICC v2 display profile (RGB → XYZ matrix + gamma 2.2 curves) like sRGB's, but with the red
 /// and green colorants swapped, so a decoder that applies it changes the colors visibly.
 fn swapped_profile() -> Vec<u8> {
+    // ICC's s15Fixed16 number format: the value × 65536 as a signed 32-bit integer.
     fn s15(v: f64) -> [u8; 4] {
         ((v * 65536.0).round() as i32).to_be_bytes()
     }

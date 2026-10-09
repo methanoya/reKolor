@@ -4,6 +4,9 @@
 import { fileLimitError, imageLimitError } from './limits';
 import { err, ok, type AppOutcome } from './outcome';
 
+// `Uint8Array<ArrayBuffer>` is a byte array backed by an ordinary (not shared) memory buffer,
+// which is what `ImageData` and transfers between threads require. An `ImageBitmap` is a decoded
+// image the browser can draw quickly.
 export interface Decoded {
   /** Straight-alpha RGBA, row-major, sRGB. */
   rgba: Uint8Array<ArrayBuffer>;
@@ -13,6 +16,7 @@ export interface Decoded {
   bitmap: ImageBitmap;
 }
 
+// `Blob` is file-like binary data; a `File` from a file input or a drop is one.
 /**
  * Decodes an image file: EXIF orientation applied, the embedded color profile converted to sRGB,
  * straight (not premultiplied) alpha in the result. The size limits are checked before any
@@ -44,12 +48,16 @@ export async function decodeImage(file: Blob): Promise<AppOutcome<Decoded>> {
     return err('imageTooLarge', tooLarge);
   }
   try {
+    // Draw the bitmap onto an off-screen canvas and read its pixels back: the browser has no direct
+    // "give me the pixels" call. `willReadFrequently` is a hint that the pixels will be read back,
+    // so the browser can choose a storage that makes `getImageData` fast.
     const context = new OffscreenCanvas(width, height).getContext('2d', {
       willReadFrequently: true,
     });
     if (!context) throw new Error('no 2D canvas context');
     context.drawImage(bitmap, 0, 0);
     const data = context.getImageData(0, 0, width, height, { colorSpace: 'srgb' }).data;
+    // `{ width, height }` is shorthand for `{ width: width, height: height }`.
     return ok({ rgba: new Uint8Array(data.buffer), width, height, bitmap });
   } catch (e) {
     bitmap.close();
@@ -57,6 +65,7 @@ export async function decodeImage(file: Blob): Promise<AppOutcome<Decoded>> {
   }
 }
 
+// Wraps the same bytes (no copy) as the `ImageData` type canvases accept.
 const imageData = (rgba: Uint8Array<ArrayBuffer>, width: number, height: number) =>
   new ImageData(
     new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, rgba.byteLength),

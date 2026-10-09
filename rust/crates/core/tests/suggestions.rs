@@ -2,6 +2,8 @@
 //! exactly (the baseline is current approved behavior; update it with
 //! `cargo run --release -p rekolor-core --example update_baseline` and review the diff).
 
+// An integration test (see `fingerprint.rs` for how these files work). The snapshot lists, for
+// each of 5,096 generated colors, the Pantone ink the engine suggests and its ΔE (6 decimals).
 #[path = "../../../testdata/generator.rs"]
 mod generator;
 
@@ -9,6 +11,8 @@ use std::path::Path;
 
 use rekolor_core::{Palette, PaletteEntry, Rgb8};
 
+// `concat!` joins string literals at compile time. `&'static` means the result borrows data that
+// lives for the whole program (the literal), so it can be returned freely.
 fn repo_root() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../.."))
 }
@@ -34,6 +38,7 @@ fn pantone() -> Palette {
     Palette::new(entries).unwrap()
 }
 
+// The snapshot rows: (color, ink name, ΔE as written).
 fn snapshot() -> Vec<([u8; 3], String, String)> {
     std::fs::read_to_string(repo_root().join("rust/testdata/baseline/pantone-suggestions.tsv"))
         .unwrap()
@@ -71,6 +76,8 @@ fn suggestions_match_the_snapshot() {
     let mut failures = Vec::new();
     for ([r, g, b], name, delta_e) in snapshot() {
         let m = palette.suggest(Rgb8::new(r, g, b));
+        // Compare with the same 6-decimal formatting the file uses (`{:.6}`), so tiny float noise
+        // in the last bits can't cause false failures, while any real change still shows.
         let actual = (m.entry.name.as_str(), format!("{:.6}", m.delta_e));
         if actual != (name.as_str(), delta_e.clone()) {
             failures.push(format!(

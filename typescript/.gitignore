@@ -1,3 +1,5 @@
+# Installed packages (`npm install`), the production build (`npm run build`), and Playwright's
+# test reports.
 node_modules/
 dist/
 test-results/

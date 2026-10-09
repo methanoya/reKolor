@@ -1,3 +1,6 @@
+# The `rekolor` command-line tool: recolor image files, generate palette configs for a samples
+# folder, and update the golden reference outputs. Build with
+# `cargo build --release -p rekolor-cli`; the program is then `target/release/rekolor`.
 [package]
 name = "rekolor-cli"
 description = "Command-line tool for rekolor: recolor files, generate palette configs, update goldens"
@@ -6,22 +9,28 @@ edition.workspace = true
 authors.workspace = true
 publish.workspace = true
 
+# The crate is both a library (helpers the tests can import as `rekolor_cli`) and a program.
 [lib]
 name = "rekolor_cli"
 path = "src/lib.rs"
 
+# The program: `cargo run -p rekolor-cli -- <arguments>` or the built `rekolor` binary.
 [[bin]]
 name = "rekolor"
 path = "src/main.rs"
 
 [dependencies]
+# Easy error handling for programs: any error type, with context messages (`.context("…")`).
 anyhow = "1.0.104"
+# Command-line argument parsing; `derive` builds the parser from annotated structs.
 clap = { version = "4.6.7", features = ["derive"] }
+# Prints `log` messages to stderr; the level is set with the `RUST_LOG` environment variable.
 env_logger = "0.11.11"
 log = "0.4.34"
 rekolor-config = { path = "../config" }
 rekolor-core = { path = "../core" }
 rekolor-io = { path = "../io" }
+# Reads `palettes/pantone.json`; `preserve_order` keeps the file's key order (it decides ties).
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
 
 [dev-dependencies]

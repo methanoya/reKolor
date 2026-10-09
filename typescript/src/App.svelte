@@ -1,4 +1,18 @@
 <script lang="ts">
+  // The root component: the whole page. It owns all of the app's state (the open image, the picks,
+  // the material, the unprinted colors, the zoom) and talks to the engine in the Web Worker through
+  // `EngineClient`. The child components only display what they are given and report the user's
+  // actions back through callbacks.
+  //
+  // Svelte basics used throughout: `$state(...)` declares a variable whose changes update the page;
+  // `$state.raw(...)` does the same but only on reassignment (not when something inside the value
+  // changes), which suits values that are always replaced whole, like bitmaps. Plain `let`
+  // variables are bookkeeping the page never shows.
+  //
+  // Every engine call is asynchronous (it goes to the worker and back), so the image or the picks
+  // may have changed by the time an answer arrives. The pattern used everywhere: copy the current
+  // `generation` (and, for recoloring, `revision`) before the call, and drop the answer if it no
+  // longer matches.
   import type { ConfigSection, ConfigUnprinted, Rgb, Rgba } from 'rekolor-wasm';
   import { onDestroy } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
@@ -27,10 +41,12 @@
   import { fit, resize, zoomAt, type Size, type View } from './lib/view';
 
   // ── Engine ───────────────────────────────────────────────────────────────────────────────────
+  // Engine startup and the status/error lines shown under the images.
   let ready = $state(false);
   let status = $state('Starting the engine…');
   let error = $state<string | undefined>();
 
+  // The callback runs when the worker crashed and was restarted: the image is gone with it.
   const client = new EngineClient((reason) => {
     resetImage();
     error = `The engine stopped (${reason}) and was restarted. Open the image again.`;
@@ -48,6 +64,7 @@
       error = outcome.error.message;
     }
   }
+  // `void` starts the async function without waiting for it (and tells the linter that's intended).
   void start();
 
   // ── Image state ──────────────────────────────────────────────────────────────────────────────
@@ -63,6 +80,7 @@
   let file = $state<{ name: string; size: number } | undefined>();
   let image = $state<Size | undefined>();
   let colors = $state<number | undefined>();
+  // The two displayed images: the decoded original and the latest recolor result.
   let original = $state.raw<ImageBitmap | undefined>();
   let result = $state.raw<ImageBitmap | undefined>();
   let resultRevision = $state(-1);
@@ -80,6 +98,7 @@
    * Kept across new images and worker restarts.
    */
   let material = $state.raw<Rgb>(WHITE);
+  // The color input's value, as `#rrggbb` text.
   /** What the color input shows: the user's newest choice, maybe not applied yet. */
   let materialInput = $state(hex(WHITE));
   /**
@@ -106,6 +125,7 @@
   let view = $state<View>({ scale: 1, x: 0, y: 0 });
   let viewport: Size = { width: 0, height: 0 };
 
+  // Bitmaps hold memory outside JavaScript's heap; `close()` frees it right away.
   /** After a worker restart: nothing is open, nothing is running. */
   function resetImage() {
     generation = 0;
@@ -133,6 +153,7 @@
     error = undefined;
     status = `Opening ${f.name}…`;
     const opened = await client.call((api) => api.open(f, gen));
+    // The answer arrived; first check that it is still wanted.
     if (gen !== requested) {
       // A newer open was started meanwhile (or the worker restarted); it owns `opening`.
       if (opened.status === 'ok') opened.value.bitmap.close();
@@ -159,6 +180,7 @@
     ranges = ranges.filter((r) => r.material);
     addingRange = false;
     mover.reset();
+    // Show the whole new image, then start counting its colors (shown in the toolbar).
     view = fit(image, viewport);
     status = 'Click a color in the original to pick it.';
     requestRecolor();
@@ -176,6 +198,8 @@
   }
 
   // ── Picks ────────────────────────────────────────────────────────────────────────────────────
+  // A click on the original: a new pick (or, after the + button, a new unprinted color). Queued in
+  // `mutations`, so it runs after any earlier pick-list change has finished.
   function pickAt(x: number, y: number, seen: Rgba | undefined) {
     if (addingRange) {
       addingRange = false;
@@ -196,6 +220,7 @@
         error = picked.error.message;
         return;
       }
+      // Unpacks the engine's answer into variables.
       const { pixel, matching, suggestion, mismatch } = picked.value;
       if (picks.some((p) => sameRgb(p.matching, matching))) {
         status = `That color (${pixel.r}, ${pixel.g}, ${pixel.b}) is already picked.`;
@@ -204,6 +229,9 @@
       const nearest = await client.call((api) => api.nearest(matching, ALTERNATIVES));
       if (gen !== generation) return;
       const alternatives = nearest.status === 'ok' ? nearest.value : [suggestion];
+      // A new array replaces the old one, and Svelte updates everything that shows `picks`.
+      // `...picks` copies the existing picks into it; `...(mismatch ? { mismatch } : {})` adds the
+      // `mismatch` field only when there is one (an optional field may not be set to `undefined`).
       picks = [
         ...picks,
         {
@@ -227,6 +255,8 @@
   // already has is skipped; on release the pick stays at its last valid pixel. Escape or a
   // lost pointer cancels: the pick is put back as it was. Ordering and coalescing: `Mover`.
 
+  // The `Mover` (see `lib/moves.ts`) decides the order of a drag's updates; these hooks do the
+  // actual pick-list work. `$state.snapshot` makes a plain, unproxied copy of reactive state.
   const mover = new Mover<{ pick: PickEntry; material: Rgb }>({
     queue: (task) => mutations.run(task),
     apply: applyMove,
@@ -240,6 +270,7 @@
       // and a Shift-drag can hardly be used at once, so this is rare).
       if (pick && saved && !sameRgb(saved.material, material)) {
         const gen = generation;
+        // `?.[0]`: the first element, or `undefined` if `rematch` failed.
         pick = (await rematch([pick], material))?.[0];
         if (gen !== generation) pick = undefined;
       }
@@ -299,11 +330,13 @@
 
   // ── Material: the color the image is composited over ───────────────────────────────────────────
   // Live while the picker is open: inputs coalesce into the queued material change while it hasn't
-  // started and nothing else was queued after it (`Serial.coalescing`), so a burst is one change and
-  // never passes another action. Applying re-matches the picks on the new material: a pick
+  // started and nothing else was queued after it (`Serial.coalescing`), so a burst is one change
+  // and never passes another action. Applying re-matches the picks on the new material: a pick
   // whose color changed gets the nearest ink again, the others keep theirs. Picks that now share a
   // color are kept.
 
+  // `setMaterial` is called on every input event of the color picker; the coalescer turns a burst
+  // of them into one queued change (see `Serial.coalescing` in `lib/serial.ts`).
   const queueMaterial = mutations.coalescing(applyMaterial);
 
   function setMaterial(color: Rgb) {
@@ -317,6 +350,8 @@
     queueMaterial({ color: WHITE, input: ++materialInputs, reset: true });
   }
 
+  // The parameter is an object, unpacked in place: `color` is renamed to `next`, and `reset`
+  // defaults to `false` when absent.
   /** Applies material input number `input` (runs inside `mutations`); `reset`: back to "none". */
   async function applyMaterial({
     color: next,
@@ -339,6 +374,7 @@
       }
       // A new image opened meanwhile has no picks yet (its picks queue behind this task).
       if (gen === generation) {
+        // Count the picks whose matching color changed (and so got a new suggested ink).
         resuggested = rematched.filter((p, i) => !sameRgb(p.matching, picks[i]!.matching)).length;
         picks = rematched;
       }
@@ -389,6 +425,7 @@
    */
   async function rematch(list: PickEntry[], on: Rgb): Promise<PickEntry[] | undefined> {
     if (list.length === 0) return [];
+    // Svelte state is wrapped in proxies, which can't be sent to the worker; send a plain copy.
     const plain = $state.snapshot(list);
     const outcome = await client.call((api) =>
       api.rematch(
@@ -403,6 +440,8 @@
     return list.map((p, i) => {
       const r = outcome.value[i];
       const ink = r?.alternatives?.[0];
+      // `{ ...p, field: value }` copies the pick and overrides some fields; the original object
+      // isn't changed.
       return r && ink ? { ...p, matching: r.matching, ink, alternatives: r.alternatives! } : p;
     });
   }
@@ -442,6 +481,7 @@
 
   // Entry changes are queued like pick changes, so they keep their place among material changes
   // and imports. A slider drag is one change per burst: one coalescer per entry.
+  // `SvelteMap` is a `Map` whose changes Svelte can track (a plain `Map` would not be reactive).
   const deltaQueues = new SvelteMap<number, (deltaE: number) => void>();
 
   function setRangeDeltaE(id: number, deltaE: number) {
@@ -503,6 +543,8 @@
   }
   let configLook: ConfigLook = { material: WHITE, unprinted: [] };
 
+  // A config file was chosen. `files?.[0]` is the first chosen file, if any; resetting the input's
+  // value lets the same file be chosen again later.
   function onconfigchosen(e: Event & { currentTarget: HTMLInputElement }) {
     const f = e.currentTarget.files?.[0];
     e.currentTarget.value = '';
@@ -537,6 +579,8 @@
         configSections = sections;
         configName = f.name;
         configLook = { material: fileMaterial, unprinted };
+        // Opens the `<dialog>` (in the markup below) as a modal: the rest of the page is inert
+        // until it closes.
         sizeDialog.showModal();
       }
     });
@@ -609,6 +653,8 @@
     if (materialChanged) void countColors();
   }
 
+  // Builds the config text in the worker (the same writer as the CLI's) and offers it as a
+  // download.
   async function exportPicks() {
     if (!file) return;
     const name = file.name;
@@ -642,6 +688,8 @@
     materialRanges: { pixel: Rgba; deltaE: number }[];
   }
 
+  // At most one recolor runs at a time; while it runs, only the newest request waits (see
+  // `lib/latest.ts`). A result is shown only if it is for the current image and revision.
   const recolorer = new Latest<RecolorRequest>(async (req) => {
     recoloring = true;
     const outcome = await client.call((api) =>
@@ -666,6 +714,8 @@
     }
   });
 
+  // Called after every change that affects the result. Each call is a new revision; the request
+  // carries plain copies of the picks, the material and the unprinted colors.
   function requestRecolor() {
     if (!image) return;
     revision++;
@@ -704,8 +754,12 @@
     save(png.value, `${stem(name)}-rekolor.png`);
   }
 
+  // The file name without its extension: the regular expression matches a final `.` and what
+  // follows it.
   const stem = (name: string) => name.replace(/\.[^.]+$/, '');
 
+  // Downloads a file: a temporary object URL for the data, clicked through an invisible link. The
+  // URL is released a little later, once the browser has started the download.
   function save(blob: Blob, name: string) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -716,6 +770,8 @@
   }
 
   // ── Zoom: one view for both canvases ───────────────────────────────────────────────────────────
+  // The views report their size: keep the same image point at the center when it changes (or fit
+  // the image, the first time).
   function setViewport(size: Size) {
     if (size.width === 0 || size.height === 0) return;
     const before = viewport;
@@ -743,6 +799,7 @@
     e.currentTarget.value = '';
   }
 
+  // `preventDefault()` stops the browser from opening the dropped file itself.
   function ondrop(e: DragEvent) {
     e.preventDefault();
     dragging = false;
@@ -758,12 +815,14 @@
     }
   }
 
+  // Runs when the component is removed: free the bitmaps and stop the worker.
   onDestroy(() => {
     original?.close();
     result?.close();
     client.dispose();
   });
 
+  // `[string, string][]`: a list of pairs (letter, color).
   /** The title in the 2023 app's rainbow colors. */
   const rainbow: [string, string][] = [
     ['r', '#e81416'],
@@ -779,6 +838,8 @@
     n < 1024 * 1024 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
 </script>
 
+<!-- Window-wide handlers: paste an image anywhere, or drag one onto the page. `{onpaste}` is
+     short for `onpaste={onpaste}`. -->
 <svelte:window
   {onpaste}
   ondragover={(e) => {
@@ -800,6 +861,8 @@
   <p class="tagline">Preview a picture printed with a limited ink palette.</p>
 </header>
 
+<!-- `class:dragging` adds the `dragging` class while the `dragging` variable is true (the
+     dashed outline). -->
 <main class:dragging>
   <section class="toolbar" aria-label="Image and zoom">
     <input
@@ -813,6 +876,7 @@
       onchange={onchosen}
       disabled={!ready}
     />
+    <!-- The real file input is hidden; this button opens its file chooser. -->
     <button type="button" class="primary" onclick={() => fileInput.click()} disabled={!ready}>
       Open image…
     </button>
@@ -845,6 +909,9 @@
   </section>
 
   <section class="views">
+    <!-- The two views share one `view` (zoom and pan), so they always show the same part of the
+         image. `{view}` is short for `view={view}`. The marker of a pick being dragged is drawn
+         where the drag is (`moving`), not where the pick still is. -->
     <ImageView
       label={addingRange
         ? 'Original — click a color to leave it unprinted (the material shows)'
@@ -887,6 +954,7 @@
     </p>
   {/if}
 
+  <!-- Shown by `sizeDialog.showModal()` when an imported config has several palettes. -->
   <dialog bind:this={sizeDialog} aria-labelledby="size-title">
     <h2 id="size-title">Which palette?</h2>
     <p>{configName} has several palettes. Import one as the pick list:</p>
@@ -923,6 +991,8 @@
           <button type="button" class="link" onclick={clearPicks}>Clear all</button>
         {/if}
       </div>
+      <!-- The pick list (`components/PickList.svelte`): it shows the picks and reports changes
+           through `onink` and `onremove`. -->
       <PickList {picks} {material} onink={changeInk} onremove={removePick} />
     </section>
 
@@ -931,6 +1001,7 @@
       <div class="material">
         <label title="The garment or surface color the image is printed on">
           Color
+          <!-- The native color picker; `oninput` fires continuously while the user drags in it. -->
           <span class="material-swatch" class:none={!materialChosen}>
             <input
               type="color"
@@ -976,6 +1047,8 @@
       {:else}
         <ol class="ranges" aria-label="Colors left to the material">
           {#each ranges as range (range.id)}
+            <!-- Each unprinted color: its swatch over the material, a remove button and a ΔE
+                 slider. -->
             {@const label = `rgb ${range.pixel.r}, ${range.pixel.g}, ${range.pixel.b}${range.pixel.a < 255 ? `, alpha ${range.pixel.a}` : ''}`}
             <li class="range">
               <span class="range-swatch" style:background={css(material)} title={label}>
@@ -1011,6 +1084,9 @@
 </main>
 
 <style>
+  /* These styles apply only to this component's own elements (Svelte adds a unique class to
+     scope them). `clamp(min, preferred, max)` lets the side padding grow with the window
+     width. */
   .top {
     display: flex;
     align-items: baseline;
@@ -1033,6 +1109,7 @@
     flex-direction: column;
     gap: 1rem;
   }
+  /* Shown while a file is dragged over the page. */
   main.dragging {
     outline: 3px dashed var(--accent);
     outline-offset: -6px;
@@ -1252,6 +1329,7 @@
     color: var(--fg);
     max-width: min(90vw, 28rem);
   }
+  /* `::backdrop` is the layer behind a modal dialog, covering the page. */
   dialog::backdrop {
     background: rgb(0 0 0 / 0.4);
   }

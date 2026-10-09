@@ -1,6 +1,9 @@
-// The pick-move rules with controlled promises: coalescing, the final
-// update, a second drag before the first settles, a reset, and cancel.
+// The pick-move rules with controlled promises: coalescing, the final update, a second drag
+// before the first settles, a reset, and cancel.
 
+// Unit tests (see `palette.test.ts` for how these test files work). A fake pick (`{ id, x }`)
+// stands in for the app's pick list, and each `apply` can be held at a gate until the test opens
+// it, to reproduce a slow worker call.
 import { describe, expect, test } from 'vitest';
 import { Mover, type Marker } from './moves';
 import type { PickMove } from './picks';
@@ -13,6 +16,7 @@ function deferred() {
   return { promise, resolve };
 }
 
+// Waits one timer tick, so the promise callbacks already scheduled have run.
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
 const move = (drag: number, x: number, done = false): PickMove => ({
@@ -30,6 +34,7 @@ function setup() {
   const pick = { id: 1, x: 0 };
   const applied: number[] = [];
   const restored: ({ id: number; x: number } | undefined)[] = [];
+  // `ReturnType<typeof deferred>` is the type of what `deferred()` returns.
   const gates: ReturnType<typeof deferred>[] = [];
   let marker: Marker | undefined;
   const mover = new Mover<{ id: number; x: number }>({

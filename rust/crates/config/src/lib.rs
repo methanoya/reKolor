@@ -23,13 +23,18 @@
 //! palette entry it maps to, by name. "Size" is the requested number of distinct inks; a palette
 //! may list fewer picks ("up to N"), and several picks may share one ink.
 //!
-//! No file I/O and no dependency on `rekolor-io` or `wasm-bindgen`: callers read and write the text.
+//! No file I/O and no dependency on `rekolor-io` or `wasm-bindgen`: callers read and write the
+//! text.
 
+// How the file is read: the structs below mirror the TOML layout, and serde (with the `toml` crate)
+// fills them from the text. `#[derive(Deserialize)]` generates that reading code;
+// `#[serde(...)]` attributes adjust it (defaults, unknown keys, custom conversions).
 use std::collections::HashSet;
 
 use rekolor_core::{Mapping, MaterialRange, Palette, Rgb8, Rgba8, composite};
 use serde::Deserialize;
 
+// Limits that keep a malicious or broken file from using too much memory or time.
 /// Largest accepted config text.
 pub const MAX_BYTES: usize = 256 * 1024;
 /// Most `[[palette]]` sections in one config.
@@ -41,9 +46,12 @@ pub const MAX_UNPRINTED: usize = 256;
 /// The ΔE a new unprinted color starts with (the app's default too).
 pub const DEFAULT_UNPRINTED_DELTA_E: f32 = 10.0;
 
+// The whole file. `deny_unknown_fields` makes a misspelled key an error instead of silently
+// ignoring it. `[u8; 3]` is a fixed-size array of three bytes.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PaletteConfig {
+    // `default = "white"`: when the key is missing, call the function `white()` below.
     /// The material color, `[r, g, b]`; white when the file has no `material` line.
     #[serde(default = "white")]
     pub material: [u8; 3],
@@ -53,8 +61,11 @@ pub struct PaletteConfig {
     pub palette: Vec<SizedPalette>,
 }
 
-/// A color left unprinted: pixels within `delta_e` (CIEDE2000) of it take
-/// no ink. In the file: `{ rgba = [r, g, b, a], delta_e = 10 }` or `{ material = true, delta_e = 10 }`.
+// `try_from = "RawUnprinted"`: serde first reads the simpler struct `RawUnprinted` (exactly as
+// written in the file), then converts it with the `TryFrom` implementation below, which rejects
+// entries that are neither a color nor the material.
+/// A color left unprinted: pixels within `delta_e` (CIEDE2000) of it take no ink. In the file:
+/// `{ rgba = [r, g, b, a], delta_e = 10 }` or `{ material = true, delta_e = 10 }`.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(try_from = "RawUnprinted")]
 pub enum Unprinted {
@@ -65,6 +76,8 @@ pub enum Unprinted {
 }
 
 impl Unprinted {
+    // The ΔE of either kind of entry. `match *self` looks inside the enum; `{ delta_e, .. }` takes
+    // the `delta_e` field and ignores the rest; `|` handles two variants in one arm.
     pub fn delta_e(&self) -> f32 {
         match *self {
             Unprinted::Color { delta_e, .. } | Unprinted::Material { delta_e } => delta_e,
@@ -84,6 +97,7 @@ impl Unprinted {
     }
 }
 
+// Private: only used while reading. `rgba` is optional (`Option`), `material` defaults to false.
 /// An `unprinted` entry as written: exactly one of `rgba` and `material = true`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -94,10 +108,13 @@ struct RawUnprinted {
     delta_e: f32,
 }
 
+// The conversion serde runs after reading a `RawUnprinted`. `type Error = String` says a failed
+// conversion is described by a text message (serde turns it into a syntax error for the file).
 impl TryFrom<RawUnprinted> for Unprinted {
     type Error = String;
 
     fn try_from(raw: RawUnprinted) -> Result<Self, Self::Error> {
+        // Match both fields at once: exactly one of "a color" or "the material" must be given.
         match (raw.rgba, raw.material) {
             (Some(rgba), false) => Ok(Unprinted::Color {
                 rgba,
@@ -111,10 +128,13 @@ impl TryFrom<RawUnprinted> for Unprinted {
     }
 }
 
+// The default `material`, used by `#[serde(default = "white")]` above.
 fn white() -> [u8; 3] {
     [255, 255, 255]
 }
 
+// One `[[palette]]` section of the file: a palette size and its picks. In TOML, `[[name]]` starts
+// one entry of a list of tables, so a file can have several sections.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SizedPalette {
@@ -122,6 +142,7 @@ pub struct SizedPalette {
     pub picks: Vec<ConfigPick>,
 }
 
+// One pick as written: the pixel color (RGBA) and the ink's name in the palette file.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigPick {
@@ -140,6 +161,8 @@ pub struct ResolvedPick {
     pub index: usize,
 }
 
+// Everything that can be wrong with a config, each with the message shown to the user. In an
+// `#[error]` message, `{0}` is the variant's first unnamed field and `{0:?}` prints it quoted.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ConfigError {
     #[error("the config is {bytes} bytes; at most {max} are allowed", max = MAX_BYTES)]
@@ -167,6 +190,8 @@ pub enum ConfigError {
 }
 
 impl PaletteConfig {
+    // `toml::from_str` reads the text into a `PaletteConfig`; a TOML syntax error, a wrong type or
+    // an unknown key comes back as an error, which `map_err` wraps as `ConfigError::Syntax`.
     /// Parses and validates a config: size limits, no repeated sizes, at most `size` distinct inks
     /// per section. Ink names are checked against a palette later ([`SizedPalette::resolve`]).
     pub fn parse(text: &str) -> Result<Self, ConfigError> {
@@ -192,6 +217,8 @@ impl PaletteConfig {
                 return Err(ConfigError::UnprintedDeltaE(delta_e));
             }
         }
+        // At most one entry may stand for the material's own color. `matches!` tests a value
+        // against a pattern and gives true or false.
         let materials = self
             .unprinted
             .iter()
@@ -205,6 +232,7 @@ impl PaletteConfig {
                 count: self.palette.len(),
             });
         }
+        // `insert` returns false if the value was already in the set: a size used twice.
         let mut sizes = HashSet::new();
         for palette in &self.palette {
             if !sizes.insert(palette.size) {
@@ -215,6 +243,7 @@ impl PaletteConfig {
         Ok(())
     }
 
+    // The section with the given size, or a `MissingSize` error.
     pub fn size(&self, size: u32) -> Result<&SizedPalette, ConfigError> {
         self.palette
             .iter()
@@ -227,9 +256,14 @@ impl PaletteConfig {
         self.unprinted.iter().map(|u| u.range(material)).collect()
     }
 
+    // Writes the file by hand rather than with a TOML library, so the layout is always the same
+    // (one pick per line), which keeps diffs of the golden configs small and readable. `format!`
+    // builds a `String` like `println!` prints; `{r}` inserts the variable `r`, and `{{`/`}}` are
+    // literal braces.
     /// Writes the config in the simple format: each header line as a `# ` comment, the material
     /// (white too), the unprinted colors (none too), then the sections in order.
     pub fn to_toml(&self, header: &[&str]) -> String {
+        // Collecting an iterator of `String`s into one `String` concatenates them.
         let mut out: String = header.iter().map(|line| format!("# {line}\n")).collect();
         let [r, g, b] = self.material;
         out.push_str(&format!("\nmaterial = [{r}, {g}, {b}]\n"));
@@ -271,6 +305,7 @@ impl PaletteConfig {
     }
 }
 
+// Quotes an ink name for TOML: quotes, backslashes and control characters must be escaped.
 /// A TOML basic string (`"…"`) with the required escapes.
 fn basic_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
@@ -299,6 +334,7 @@ impl SizedPalette {
                 count: self.picks.len(),
             });
         }
+        // Several picks may share an ink, so count the distinct ink names, not the picks.
         let inks: HashSet<&str> = self.picks.iter().map(|p| p.ink.as_str()).collect();
         if inks.len() > self.size as usize {
             return Err(ConfigError::TooManyInks {
@@ -319,6 +355,9 @@ impl SizedPalette {
         self.picks
             .iter()
             .map(|pick| {
+                // Find the ink by name; `ok_or_else(...)?` turns "not found" into an `UnknownInk`
+                // error and returns it. Collecting into a `Result<Vec<_>, _>` stops at the first
+                // error.
                 let index = palette
                     .entries()
                     .iter()
@@ -334,6 +373,7 @@ impl SizedPalette {
             .collect()
     }
 
+    // `into_iter` (instead of `iter`) consumes the resolved list, taking each item by value.
     /// The mappings for recoloring on `material`: each pick's matching color → its ink's color.
     pub fn mappings(&self, palette: &Palette, material: Rgb8) -> Result<Vec<Mapping>, ConfigError> {
         Ok(self
@@ -347,6 +387,7 @@ impl SizedPalette {
     }
 }
 
+// Unit tests for this file, run with `cargo test -p rekolor-config`.
 #[cfg(test)]
 mod tests {
     use super::*;

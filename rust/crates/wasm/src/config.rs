@@ -1,6 +1,9 @@
 //! Palette config import/export for the web app: thin wrappers over `rekolor-config`, so
 //! the app reads, validates and writes `*.palettes.toml` exactly like the CLI.
 
+// `use ... as ...` gives a crate a short local name: `config::PaletteConfig` below is the shared
+// config crate. The structs in this file mirror its types for TypeScript, like `types.rs` does for
+// the core.
 use rekolor_config as config;
 use rekolor_core as core;
 use serde::{Deserialize, Serialize};
@@ -25,6 +28,9 @@ pub struct ConfigSection {
     pub picks: Vec<ConfigPick>,
 }
 
+// In JavaScript: `{ kind: "color", rgba, deltaE }` or `{ kind: "material", deltaE }`.
+// `tag = "kind"` adds the variant name as a `kind` field, and the inner `rename_all` writes
+// `delta_e` as `deltaE`.
 /// A color left unprinted, as in a config: a stored pixel color, or the
 /// material's own color (whatever the material is).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Tsify)]
@@ -80,6 +86,7 @@ pub struct ConfigExport {
     pub picks: Vec<ConfigPick>,
 }
 
+// A plain wrapper, because an `Outcome` value must be an object (`{ text }`), not a bare string.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Tsify)]
 pub struct ConfigText {
     pub text: String,
@@ -95,6 +102,8 @@ extern "C" {
     pub type ConfigTextOutcome;
 }
 
+// Conversions between the config crate's types and the TypeScript-facing ones, in both
+// directions (reading a file, and writing one).
 impl From<config::ConfigError> for ErrorInfo {
     fn from(e: config::ConfigError) -> Self {
         Self {
@@ -147,6 +156,7 @@ impl From<ConfigPick> for config::ConfigPick {
     }
 }
 
+// `&str` parameters receive a JavaScript string (wasm-bindgen copies it in as UTF-8).
 /// Parses and validates a palette config (sizes, distinct inks per size, limits). Ink names are
 /// checked later against a palette (`Palette.resolveSection`).
 #[wasm_bindgen(js_name = parseConfig)]
@@ -175,6 +185,9 @@ pub fn serialize_config(request: Ts<ConfigExport>) -> ConfigTextOutcome {
         .to_rust()
         .map_err(ErrorInfo::from)
         .and_then(|request| {
+            // The section's size is the number of picks. `try_from` fails only above 2^32 − 1
+            // picks; `validate` below rejects far fewer anyway, so `u32::MAX` just guarantees that
+            // error.
             let size = u32::try_from(request.picks.len()).unwrap_or(u32::MAX);
             let Rgb { r, g, b } = request.material;
             let config = config::PaletteConfig {
@@ -198,6 +211,7 @@ pub fn serialize_config(request: Ts<ConfigExport>) -> ConfigTextOutcome {
 }
 
 impl Palette {
+    // Shared by `resolveSection` below and the Rust tests.
     pub(crate) fn resolve(
         &self,
         section: ConfigSection,
@@ -217,6 +231,8 @@ impl Palette {
                 ResolvedPick {
                     pixel: p.rgba.into(),
                     matching: p.matching.into(),
+                    // Report the named ink as a match, with its real distance from the pick's
+                    // color.
                     ink: PaletteMatch::from(core::PaletteMatch {
                         index: p.index,
                         entry,
@@ -229,6 +245,8 @@ impl Palette {
     }
 }
 
+// A second exported `impl` block for the same class: wasm-bindgen merges the methods, so
+// JavaScript sees `palette.resolveSection(...)` next to `suggest` and `nearest`.
 #[wasm_bindgen]
 impl Palette {
     /// Resolves a config section against this palette: every ink must be a palette entry (an

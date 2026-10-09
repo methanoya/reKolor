@@ -1,5 +1,8 @@
 #!/usr/bin/env sh
+# Git hook for husky: Git runs it after each commit when `core.hooksPath` points to `.husky/`.
 . "$(dirname -- "$0")/_/husky.sh"
 
 echo running husky post-commit
+# Refresh the index entries of the files in the commit, so files the pre-commit hook rewrote don't
+# show as modified afterwards.
 git update-index --again

@@ -6,6 +6,9 @@
 // - ICC profile: expected to differ (the browser applies it, `rekolor-io` reports it): the size
 //   must match and the decoder warning must be recorded; the difference is logged, not asserted.
 
+// Browser tests (`npm run test:browser`), run in each browser engine; `server.browser` names the
+// current one in the test titles. The reference pixels are the `.rgba` files written by the Rust
+// side (see `fixtures.ts`).
 import { server } from 'vitest/browser';
 import { describe, expect, test } from 'vitest';
 import { decodeImage } from '../../src/lib/codec';
@@ -30,6 +33,8 @@ function firstDifference(a: Uint8Array, b: Uint8Array, width: number): string | 
   return undefined;
 }
 
+// A channel composited over white, exactly as the Rust `composite` computes it:
+// `(a·c + (255 − a)·255) / 255`, rounded down.
 const overWhite = (c: number, a: number) => 255 - a + Math.floor((a * c) / 255);
 
 describe(`browser decoding vs rekolor-io (${server.browser})`, () => {

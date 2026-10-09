@@ -4,6 +4,8 @@
 //! Native only: never a dependency of `rekolor-wasm`. Formats: every format `image` can read
 //! with the workspace feature set (the `image` dependency in the workspace `Cargo.toml`).
 
+// `std` is Rust's standard library: `fmt` for formatting text, `io::Cursor` to read a byte slice
+// like a file, `path` for file-system paths.
 use std::fmt;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -12,6 +14,8 @@ use image::metadata::Orientation;
 use image::{DynamicImage, ImageDecoder, ImageEncoder, ImageFormat, ImageReader};
 use rekolor_core::ImageRef;
 
+// The errors of this crate. `#[error(transparent)]` reuses the inner error's message, and
+// `#[from]` lets `?` convert a `rekolor_core::Error` into this type automatically.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -30,6 +34,8 @@ pub enum Error {
     InvalidImage(#[from] rekolor_core::Error),
 }
 
+// The doc example above is marked `compile_fail`: `cargo test` checks that it does NOT compile,
+// which proves the fields can't be set from outside this crate.
 /// A decoded image: RGBA8 pixels (straight alpha, row-major) plus the decoder warnings.
 ///
 /// Only [`decode`] and [`decode_file`] create one, so its dimensions always match its buffer and
@@ -60,6 +66,8 @@ impl DecodedImage {
         &self.rgba
     }
 
+    // `self` (not `&self`) takes ownership: the image is used up and the caller gets the buffer
+    // without a copy.
     /// Takes the pixel buffer out.
     pub fn into_rgba(self) -> Vec<u8> {
         self.rgba
@@ -91,6 +99,8 @@ pub enum DecodeWarning {
     SemiTransparentPixels { count: u64 },
 }
 
+// Implementing `Display` defines how a warning prints with `{}` (e.g. in `eprintln!`). `write!`
+// formats text into the given formatter.
 impl fmt::Display for DecodeWarning {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -112,6 +122,7 @@ impl fmt::Display for DecodeWarning {
 /// Reads and decodes an image file. The format is detected from the content; when that fails
 /// (TGA has no magic bytes), the file extension decides.
 pub fn decode_file(path: &Path) -> Result<DecodedImage, Error> {
+    // Read the whole file into memory; on failure, keep the path in the error for a useful message.
     let bytes = std::fs::read(path).map_err(|source| Error::Io {
         path: path.to_owned(),
         source,
@@ -126,8 +137,12 @@ pub fn decode(bytes: &[u8]) -> Result<DecodedImage, Error> {
     decode_with_hint(bytes, None)
 }
 
+// The decoding steps: detect the format, read the ICC profile and the EXIF orientation (rotation
+// stored by cameras), decode, rotate, convert to RGBA8, then collect the warnings.
 fn decode_with_hint(bytes: &[u8], hint: Option<ImageFormat>) -> Result<DecodedImage, Error> {
     let mut reader = ImageReader::new(Cursor::new(bytes))
+        // `with_guessed_format` looks at the first bytes (the file's "magic number") to find the
+        // format.
         .with_guessed_format()
         .expect("reading from memory can't fail");
     if reader.format().is_none() {
@@ -136,11 +151,13 @@ fn decode_with_hint(bytes: &[u8], hint: Option<ImageFormat>) -> Result<DecodedIm
             None => return Err(Error::UnknownFormat),
         }
     }
+    // `map_err(Error::Decode)` wraps the library's error in this crate's `Decode` variant.
     let mut decoder = reader.into_decoder().map_err(Error::Decode)?;
     let icc = decoder.icc_profile().map_err(Error::Decode)?;
     let orientation = decoder.orientation().map_err(Error::Decode)?;
     let mut image = DynamicImage::from_decoder(decoder).map_err(Error::Decode)?;
     image.apply_orientation(orientation);
+    // Whatever the file stores (gray, 16 bits per channel, no alpha, …) becomes 8-bit RGBA here.
     let rgba = image.to_rgba8();
     let (width, height) = rgba.dimensions();
     let rgba = rgba.into_raw();
@@ -148,6 +165,7 @@ fn decode_with_hint(bytes: &[u8], hint: Option<ImageFormat>) -> Result<DecodedIm
     ImageRef::new(&rgba, width, height)?;
 
     let mut warnings = Vec::new();
+    // `filter` keeps the profile only if it isn't empty; an empty one is the same as none.
     if let Some(profile) = icc.filter(|p| !p.is_empty()) {
         warnings.push(DecodeWarning::IccProfile {
             bytes: profile.len(),
@@ -158,6 +176,7 @@ fn decode_with_hint(bytes: &[u8], hint: Option<ImageFormat>) -> Result<DecodedIm
             exif_value: exif_value(orientation),
         });
     }
+    // Count pixels whose alpha is neither 0 nor 255 (`p[3]` is the alpha byte).
     let semi_transparent = rgba
         .as_chunks::<4>()
         .0
@@ -181,6 +200,7 @@ fn decode_with_hint(bytes: &[u8], hint: Option<ImageFormat>) -> Result<DecodedIm
     })
 }
 
+// Validates the buffer first (`ImageRef::new`), so a wrong length is an error, not a corrupt PNG.
 /// Encodes an RGBA8 buffer (`width × height × 4` bytes) as PNG.
 pub fn encode_png(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, Error> {
     ImageRef::new(rgba, width, height)?;
@@ -200,6 +220,7 @@ pub fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> Result<()
     })
 }
 
+// Used only for the warning message: the number a camera writes into the file's EXIF data.
 /// The EXIF orientation value (1–8) of an orientation.
 fn exif_value(orientation: Orientation) -> u8 {
     match orientation {

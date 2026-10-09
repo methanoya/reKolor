@@ -1,3 +1,5 @@
+// Unit tests for the zoom and pan math in `view.ts` (see `palette.test.ts` for how these test
+// files work).
 import { describe, expect, test } from 'vitest';
 import {
   centered,
@@ -23,6 +25,7 @@ describe('view', () => {
   test('clicks land on the source pixel at any zoom', () => {
     for (const scale of [0.25, 0.5, 1, 3, 8, 37.5]) {
       const view = centered(image, viewport, scale);
+      // `as const` keeps each pair's type as a fixed pair of numbers.
       for (const [x, y] of [
         [0, 0],
         [123, 45],

@@ -5,6 +5,9 @@
 //! working, and buffer-length checks. Also the ΔE fingerprint, the Sharma reference data and the
 //! Pantone suggestion snapshot, all checked against the same files as the native tests.
 
+// This whole file compiles only for the WASM target (`#![cfg(...)]` on the file), so a native
+// `cargo test --workspace` skips it. `wasm-pack test --node` compiles the tests to WebAssembly and
+// runs them in Node.js, which executes WASM the same way a browser does.
 #![cfg(target_arch = "wasm32")]
 
 #[path = "../../../testdata/generator.rs"]
@@ -20,8 +23,12 @@ use rekolor_wasm::{
 use serde::de::DeserializeOwned;
 use tsify::{Ts, Tsify};
 use wasm_bindgen::JsValue;
+// `#[wasm_bindgen_test]` replaces `#[test]` for tests that run inside WASM.
 use wasm_bindgen_test::wasm_bindgen_test;
 
+// `macro_rules!` defines a macro: code that writes code at compile time. This one expands the
+// table below into one `(fixture, set, PNG bytes)` entry per combination, embedding each baseline
+// PNG with `include_bytes!`. `$(...),*` repeats a pattern for each comma-separated item.
 /// The baseline outputs, compiled in (WASM tests have no file system).
 macro_rules! baseline_table {
     ($($fixture:literal => [$($set:literal),*]);* $(;)?) => {
@@ -59,6 +66,9 @@ fn decode_png(bytes: &[u8]) -> (u32, u32, Vec<u8>) {
     (info.width, info.height, buf)
 }
 
+// The exported functions return JavaScript values (`JsValue`), as the browser would receive
+// them; the tests convert them back to Rust to inspect them. `new_unchecked` wraps the value
+// without checking its type; `to_rust` then fails if the shape is wrong.
 /// Reads a returned outcome back into Rust.
 fn read<T: Tsify + DeserializeOwned>(js: impl Into<JsValue>) -> Outcome<T> {
     Ts::<Outcome<T>>::new_unchecked(js.into())
@@ -66,6 +76,7 @@ fn read<T: Tsify + DeserializeOwned>(js: impl Into<JsValue>) -> Outcome<T> {
         .expect("outcome deserializes")
 }
 
+// The value of a successful outcome, or the error's kind; anything else fails the test.
 fn ok<T: std::fmt::Debug>(outcome: Outcome<T>) -> T {
     match outcome {
         Outcome::Ok { value } => value,
@@ -131,6 +142,7 @@ fn small_palette() -> Palette {
     .unwrap()
 }
 
+// `object[key]` in JavaScript terms.
 /// Reads a property of a returned JS object.
 fn property(object: &JsValue, key: &str) -> JsValue {
     js_sys::Reflect::get(object, &key.into()).unwrap()

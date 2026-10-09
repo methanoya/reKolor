@@ -1,6 +1,10 @@
-// The real worker through Comlink: decoding in the worker, generations, transfers,
-// typed errors, and the PNG of exactly the current revision.
+// The real worker through Comlink: decoding in the worker, generations, transfers, typed errors,
+// and the PNG of exactly the current revision.
 
+// Browser tests (`npm run test:browser`): Vitest runs this file inside real browsers (Chromium,
+// Firefox and WebKit, through Playwright), so the worker, `createImageBitmap`, canvases and the
+// WASM module are the browsers' own. One engine client is shared by the tests and stopped after
+// the last one (`afterAll`).
 import { afterAll, describe, expect, test } from 'vitest';
 import { EngineClient } from '../../src/lib/client';
 import type { AppOutcome } from '../../src/lib/outcome';

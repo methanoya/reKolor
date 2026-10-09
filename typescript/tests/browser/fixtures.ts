@@ -1,6 +1,9 @@
 // Access to the cross-decoder fixtures recorded by
 // `cargo run --release -p rekolor-io --example update_decoder_fixtures`.
 
+// These run in the browser, which can't read files directly: Vite serves them. `?raw` imports a
+// file's text; `import.meta.glob` finds files by pattern at build time and here gives each one's
+// URL, to `fetch` it later.
 import referencesTsv from '../../../rust/testdata/decoders/references.tsv?raw';
 
 const urls = import.meta.glob('../../../rust/testdata/decoders/*.{png,jpg,rgba}', {
@@ -17,6 +20,7 @@ export interface Reference {
   warnings: string;
 }
 
+// One row per fixture; `= ''` and `= '0'` are fallbacks for missing columns.
 export const references: Reference[] = referencesTsv
   .split('\n')
   .filter((l) => l && !l.startsWith('#'))

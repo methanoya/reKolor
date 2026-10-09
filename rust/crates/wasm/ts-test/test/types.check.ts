@@ -1,6 +1,7 @@
 // Type-level contract checks: `tsc --noEmit` must accept every line, and each
 // `@ts-expect-error` must really be an error. Never run, only type-checked.
 
+// `import type` imports only types; nothing is loaded at runtime.
 import type {
   ConfigSection,
   ConfigUnprinted,
@@ -14,6 +15,10 @@ import type {
   SourceImage,
 } from 'rekolor-wasm';
 
+// `declare const` tells the compiler a value of this type exists without creating it; enough for
+// type checks, since this file never runs. `void x` marks a variable as used, so the compiler
+// doesn't warn about it. `// @ts-expect-error` asserts that the next line does NOT compile: if it
+// ever did, `tsc` would report the directive itself as an error.
 declare const outcome: Outcome<RecolorStats>;
 declare const stats: ImageStats;
 declare const image: SourceImage;
@@ -100,4 +105,5 @@ void unprinted;
 const noColor: ConfigUnprinted = { kind: 'color', deltaE: 2 };
 void noColor;
 
+// Makes this file a module (with its own scope) rather than a global script.
 export {};

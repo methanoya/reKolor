@@ -1,3 +1,7 @@
+/* Global styles for the whole app (each Svelte component also has its own, scoped styles).
+
+   The colors are CSS custom properties ("variables", the `--name` entries), used elsewhere as
+   `var(--name)`. `:root` is the page's root element. */
 :root {
   color-scheme: light dark;
   --bg: #f7f7f5;
@@ -21,6 +25,7 @@
   color: var(--fg);
 }
 
+/* The same colors for dark mode: applied when the system is set to dark. */
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #161615;
@@ -52,6 +57,7 @@ button {
   cursor: pointer;
 }
 
+/* Shared button styles: the default, a disabled one, a `primary` one and a `link`-looking one. */
 button:disabled {
   opacity: 0.5;
   cursor: default;
@@ -71,11 +77,13 @@ button.link {
   text-decoration: underline;
 }
 
+/* A clear outline around whatever has keyboard focus (not shown for mouse clicks). */
 :focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 
+/* Hidden from sight but still read by screen readers (labels that are clear from the layout). */
 .visually-hidden {
   position: absolute;
   width: 1px;

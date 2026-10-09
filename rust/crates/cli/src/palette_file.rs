@@ -8,6 +8,8 @@ use rekolor_core::{Palette, PaletteEntry, Rgb8};
 /// The default palette path, relative to the repository root.
 pub const DEFAULT_PALETTE: &str = "palettes/pantone.json";
 
+// `ancestors()` yields the folder itself, then its parent, and so on up to the root. `bail!`
+// returns an error with a formatted message.
 /// Finds `palettes/pantone.json` in the current directory or the nearest parent that has it,
 /// so the default works from the repository root and from `rust/` alike.
 pub fn find_default(start: &Path) -> Result<PathBuf> {
@@ -31,13 +33,17 @@ pub fn load(path: &Path) -> Result<Palette> {
     parse(&text).with_context(|| format!("parsing {}", path.display()))
 }
 
+// Parses the JSON text. `serde_json::Value` is "any JSON value"; the `preserve_order` feature (see
+// `Cargo.toml`) keeps the object's keys in file order.
 pub fn parse(json: &str) -> Result<Palette> {
     let value: serde_json::Value = serde_json::from_str(json)?;
+    // `let ... else`: if the value isn't a JSON object, run the `else` block (which must return).
     let Some(object) = value.as_object() else {
         bail!("the palette must be a JSON object of name → {{ \"rgb\": [r, g, b] }}");
     };
     let mut entries = Vec::with_capacity(object.len());
     for (name, entry) in object {
+        // Reading into `[u8; 3]` checks the shape for free: exactly three numbers, each 0–255.
         let rgb: [u8; 3] = serde_json::from_value(entry["rgb"].clone())
             .with_context(|| format!("entry {name:?}: \"rgb\" must be three numbers 0–255"))?;
         entries.push(PaletteEntry::new(name.clone(), Rgb8::from(rgb)));

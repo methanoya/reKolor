@@ -3,9 +3,8 @@
 //!
 //! Rule (deterministic):
 //! 1. Group pixels by their matching color (composited over the material, as an interactive pick
-//!    is),
-//!    coarsened to 16 levels per channel so photo noise doesn't fragment a color into thousands
-//!    of groups. Each group's representative is its most frequent exact pixel value.
+//!    is), coarsened to 16 levels per channel so photo noise doesn't fragment a color into
+//!    thousands of groups. Each group's representative is its most frequent exact pixel value.
 //! 2. Candidates: the [`CANDIDATES`] most frequent groups ("predominant").
 //! 3. Greedy farthest-point selection: start with the most frequent candidate, then repeatedly
 //!    take the candidate whose CIEDE2000 distance to the nearest already-chosen color is
@@ -14,6 +13,7 @@
 //!
 //! The selection doesn't depend on N, so smaller palettes are prefixes of larger ones.
 
+// `HashMap` is a key → value dictionary.
 use std::collections::HashMap;
 
 use rekolor_core::{ImageRef, Palette, Rgb8, Rgba8, composite, delta_e_2000};
@@ -36,7 +36,8 @@ pub fn picks(
     material: Rgb8,
     max: usize,
 ) -> Vec<GeneratedPick> {
-    // Exact pixel counts.
+    // Exact pixel counts. `entry(p).or_default()` gets the count for this pixel value, inserting 0
+    // the first time; `*... += 1` adds one to the stored count.
     let mut exact: HashMap<Rgba8, u64> = HashMap::new();
     for p in image.pixels() {
         *exact.entry(p).or_default() += 1;
@@ -46,6 +47,9 @@ pub fn picks(
     exact.sort_unstable_by_key(|&(p, _)| (p.r, p.g, p.b, p.a));
 
     // Groups: total count and most frequent exact pixel (ties: the smaller value, from the sort).
+    // Each group is keyed by the color's top 4 bits per channel (`>> 4` divides by 16); its value
+    // holds (total pixels, most frequent exact pixel, that pixel's count). `group.0`, `.1`, `.2`
+    // are the tuple's fields by position.
     let mut groups: HashMap<[u8; 3], (u64, Rgba8, u64)> = HashMap::new();
     for (pixel, count) in exact {
         let Rgb8 { r, g, b } = composite(pixel, material);
@@ -58,6 +62,8 @@ pub fn picks(
             group.2 = count;
         }
     }
+    // Most frequent groups first (`b.1.cmp(&a.1)` sorts descending); the key breaks ties so the
+    // order never depends on the hash map.
     let mut candidates: Vec<([u8; 3], u64, Rgba8)> = groups
         .into_iter()
         .map(|(key, (total, pixel, _))| (key, total, pixel))
@@ -65,13 +71,17 @@ pub fn picks(
     candidates.sort_unstable_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     candidates.truncate(CANDIDATES);
 
+    // Each candidate as (stored pixel, matching color, pixel count).
     let mut remaining: Vec<(Rgba8, Rgb8, u64)> = candidates
         .into_iter()
         .map(|(_, count, pixel)| (pixel, composite(pixel, material), count))
         .collect();
     let mut chosen: Vec<(GeneratedPick, Rgb8)> = Vec::new();
     while chosen.len() < max && !remaining.is_empty() {
-        // Farthest from everything chosen so far (the first pick: the most frequent).
+        // Farthest from everything chosen so far (the first pick: the most frequent). `max_by` with
+        // a custom comparison: the larger "distance to the nearest chosen color" wins. Before
+        // anything is chosen, every distance is infinity, so the count decides: the most frequent
+        // color goes first.
         let best = remaining
             .iter()
             .enumerate()
@@ -89,6 +99,7 @@ pub fn picks(
             })
             .map(|(i, _)| i)
             .expect("remaining is not empty");
+        // Take the winner out of the candidates; `_` ignores the count.
         let (pixel, matching, _) = remaining.remove(best);
         let ink_index = palette.suggest(matching).index;
         if chosen.iter().any(|(p, _)| p.ink_index == ink_index) {
@@ -105,6 +116,7 @@ pub fn picks(
     chosen.into_iter().map(|(pick, _)| pick).collect()
 }
 
+// Unit tests with small hand-made images and a five-color palette.
 #[cfg(test)]
 mod tests {
     use super::*;

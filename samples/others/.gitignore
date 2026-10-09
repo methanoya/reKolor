@@ -1,1 +1,2 @@
+# Output images saved into this folder are never committed.
 output-*.png

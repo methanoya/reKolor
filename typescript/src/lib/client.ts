@@ -3,13 +3,21 @@
 // pending calls settle with `workerFailed`, a fresh worker is started and `onRestart` is told, so
 // the user can open an image again.
 
+// Background: the WASM engine runs in a Web Worker, a separate thread, so slow work (decoding,
+// recoloring a large image) never freezes the page. A worker can only exchange messages with the
+// page; Comlink wraps that messaging so the page can call the worker's functions as if they were
+// local async functions.
 import * as Comlink from 'comlink';
 import { err, type AppOutcome } from './outcome';
 import type { WorkerApi } from './worker';
 
+// `Comlink.Remote<WorkerApi>` is the worker's API as seen from here: every method returns a
+// `Promise`.
 type Api = Comlink.Remote<WorkerApi>;
 
 export class EngineClient {
+  // `!` tells TypeScript these fields are set before use (by `#start()`, called from the
+  // constructor), even though they have no initial value here.
   #worker!: Worker;
   #api!: Api;
   #crashed!: Promise<never>;
@@ -22,9 +30,13 @@ export class EngineClient {
   }
 
   #start(): void {
+    // This `new URL(..., import.meta.url)` form is the pattern Vite recognizes to bundle the worker
+    // file.
     this.#worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
     this.#api = Comlink.wrap<WorkerApi>(this.#worker);
     const worker = this.#worker;
+    // A promise that never succeeds (`never`) and fails when the worker reports an error. Racing it
+    // against each call turns a crash into a failed call instead of a call that waits forever.
     this.#crashed = new Promise<never>((_, reject) => {
       worker.addEventListener('error', (e) => reject(new Error(e.message || 'worker error')));
       worker.addEventListener('messageerror', () => reject(new Error('unreadable worker message')));
@@ -35,6 +47,7 @@ export class EngineClient {
 
   #restart(reason: string): void {
     if (this.#disposed) return;
+    // Close the Comlink connection, stop the old worker, start a new one.
     this.#api[Comlink.releaseProxy]();
     this.#worker.terminate();
     this.#start();
@@ -45,6 +58,7 @@ export class EngineClient {
   async call<T>(f: (api: Api) => Promise<AppOutcome<T>>): Promise<AppOutcome<T>> {
     const api = this.#api;
     try {
+      // `Promise.race` settles with whichever promise settles first: the call's result, or a crash.
       return await Promise.race([f(api), this.#crashed]);
     } catch (e) {
       // An argument the browser can't send (e.g. a Svelte state proxy) is a caller bug, not a
@@ -52,6 +66,7 @@ export class EngineClient {
       if (e instanceof DOMException && e.name === 'DataCloneError') {
         return err('invalidInput', `couldn't send the request to the engine (${e.message})`);
       }
+      // Restart only once: if another call already restarted the worker, `this.#api` is a new one.
       if (api === this.#api) this.#restart(String(e));
       return err('workerFailed', `the engine stopped (${String(e)}) and was restarted`);
     }

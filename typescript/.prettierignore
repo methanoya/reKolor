@@ -1,3 +1,5 @@
+# Files `prettier` (the code formatter) never checks or rewrites: build output, installed
+# packages, the generated lock file, and test artifacts.
 dist/
 node_modules/
 package-lock.json

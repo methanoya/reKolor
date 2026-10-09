@@ -1,3 +1,5 @@
+// Unit tests for `limits.ts` (see `palette.test.ts` for how these test files work).
+// `toMatch(/regex/)` checks a string against a regular expression.
 import { describe, expect, test } from 'vitest';
 import { LIMITS, fileLimitError, imageLimitError } from './limits';
 

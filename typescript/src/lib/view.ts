@@ -18,6 +18,8 @@ export interface View {
 export const MIN_SCALE = 1 / 64;
 export const MAX_SCALE = 64;
 
+// Every function below returns a new `View` object rather than changing the one it is given, so
+// the app can simply assign the result to its state.
 const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
 
 /** The whole image, centered (never enlarged beyond 1:1 for small images). */
@@ -48,6 +50,7 @@ export function zoomAt(view: View, factor: number, px: number, py: number): View
 
 /** Moves the image by (dx, dy) CSS pixels (dragging). */
 export function pan(view: View, dx: number, dy: number): View {
+  // `{ ...view, x, y }` copies every field of `view`, then overrides `x` and `y`.
   return { ...view, x: view.x - dx / view.scale, y: view.y - dy / view.scale };
 }
 
@@ -89,6 +92,8 @@ export function clampedPixel(
   };
 }
 
+// Generic over the marker type: any object with `x` and `y` works, and the caller gets its own
+// type back. `readonly M[]` promises not to change the array.
 /** The marker nearest to a CSS position within `radius` CSS pixels of its center, if any. */
 export function markerAt<M extends { x: number; y: number }>(
   view: View,

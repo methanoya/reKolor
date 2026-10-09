@@ -1,8 +1,10 @@
 //! `core` must match the baseline snapshot in `testdata/baseline/` pixel for pixel (the current
-//! approved behavior). Inputs come from
-//! `testdata/generator.rs`. After an intentional change:
+//! approved behavior). Inputs come from `testdata/generator.rs`. After an intentional change:
 //! `cargo run --release -p rekolor-core --example update_baseline`, review the diff, commit.
 
+// An integration test (see `fingerprint.rs` for how these files work). The test images are
+// generated in code by `generator.rs`, and the expected outputs are PNG files in
+// `testdata/baseline/recolor/`, named `<image>__<mapping set>.png`.
 #[path = "../../../testdata/generator.rs"]
 mod generator;
 
@@ -12,12 +14,16 @@ use std::path::{Path, PathBuf};
 
 use rekolor_core::{ImageRef, Mapping, Rgb8, analyze, recolor};
 
+// `env!("CARGO_MANIFEST_DIR")` is this crate's folder, filled in at compile time, so the tests
+// find their files whatever the current directory is.
 fn baseline_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/baseline")
 }
 
 /// Decodes a baseline PNG to RGBA8: (width, height, pixels).
 fn decode_png(path: &Path) -> (u32, u32, Vec<u8>) {
+    // In tests, `unwrap`/`expect` are fine: a failure panics, and a panic fails the test with its
+    // message.
     let file = File::open(path).unwrap_or_else(|e| panic!("open {}: {e}", path.display()));
     let mut decoder = png::Decoder::new(BufReader::new(file));
     decoder.set_transformations(png::Transformations::normalize_to_color8());
@@ -38,6 +44,8 @@ fn decode_png(path: &Path) -> (u32, u32, Vec<u8>) {
 /// few with expected/actual colors.
 fn compare_pixels(label: &str, width: u32, expected: &[u8], actual: &[u8]) -> Result<(), String> {
     assert_eq!(expected.len(), actual.len(), "{label}: buffer length");
+    // Indexes of the pixels that differ; `a[i..j]` is the slice of bytes from `i` up to (not
+    // including) `j`, here one pixel's four bytes.
     let differing: Vec<usize> = (0..expected.len() / 4)
         .filter(|i| expected[i * 4..i * 4 + 4] != actual[i * 4..i * 4 + 4])
         .collect();
@@ -65,6 +73,8 @@ fn compare_pixels(label: &str, width: u32, expected: &[u8], actual: &[u8]) -> Re
     ))
 }
 
+// Every fixture image × every mapping set: collect all mismatches first and fail once at the
+// end, so a single run reports every difference.
 #[test]
 fn recolor_reproduces_the_baseline() {
     let mut failures = Vec::new();
@@ -101,6 +111,8 @@ fn recolor_reproduces_the_baseline() {
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }
 
+// `image-info.tsv` holds one tab-separated row per fixture: name, width, height, colors and RGBA
+// colors. Lines starting with `#` are comments.
 #[test]
 fn analyze_reproduces_image_info() {
     let tsv = std::fs::read_to_string(baseline_dir().join("image-info.tsv")).unwrap();

@@ -1,3 +1,5 @@
+// Unit tests for `latest.ts` (see `palette.test.ts` for how these test files work). The runs are
+// promises the test finishes by hand, so the timing of every step is under the test's control.
 import { describe, expect, test } from 'vitest';
 import { Latest } from './latest';
 
@@ -12,6 +14,8 @@ function controlled() {
         finish.push(resolve);
       }),
   );
+  // Finish the oldest run, then wait one timer tick so the promise callbacks that follow it
+  // (starting the next run) have happened before the test looks.
   const finishNext = async () => {
     finish.shift()?.();
     await new Promise((r) => setTimeout(r, 0));

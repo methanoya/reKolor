@@ -14,9 +14,14 @@
 //!
 //! Tests only read these files.
 
+// Files in a crate's `examples/` folder are small programs built against the crate; this one is
+// a maintenance tool rather than an example. `#[path]` shares the test-data generator with the
+// tests (see `tests/fingerprint.rs`).
 #[path = "../../../testdata/generator.rs"]
 mod generator;
 
+// Importing the `Write` trait (`as _`: without a name) enables `writeln!(string, ...)`, which
+// appends a formatted line to a `String`.
 use std::fmt::Write as _;
 use std::fs::File;
 use std::io::BufReader;
@@ -26,6 +31,7 @@ use rekolor_core::{
     ImageRef, Mapping, Palette, PaletteEntry, Rgb8, analyze, delta_e_2000, recolor,
 };
 
+// `--colors-from-current` is checked by hand; a tool this small needs no argument parser.
 fn main() {
     let colors_from_current = std::env::args().any(|a| a == "--colors-from-current");
     let rust_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -49,6 +55,7 @@ fn main() {
             let path = baseline.join(format!("recolor/{}__{}.png", fixture.name, set.name));
             // Rewrite unless size and pixels both match (the baseline test checks both).
             let current = decode_png(&path);
+            // `rgba[..] == out[..]` compares the two buffers byte by byte.
             let unchanged = current.as_ref().is_some_and(|(w, h, rgba)| {
                 (*w, *h) == (fixture.width, fixture.height) && rgba[..] == out[..]
             });
@@ -80,6 +87,7 @@ fn main() {
 
     // Pantone suggestions.
     let suggestions_path = baseline.join("pantone-suggestions.tsv");
+    // `if` is an expression in Rust: each branch produces a value, and the chosen one is stored.
     let colors: Vec<[u8; 3]> = if colors_from_current {
         std::fs::read_to_string(&suggestions_path)
             .unwrap()
@@ -142,6 +150,7 @@ fn pantone(path: &Path) -> Palette {
     Palette::new(entries).unwrap()
 }
 
+// `?` also works on `Option`: `.ok()?` turns an error into `None` and returns it.
 /// A PNG as RGBA8: (width, height, pixels), or `None` if the file is missing or unreadable.
 fn decode_png(path: &Path) -> Option<(u32, u32, Vec<u8>)> {
     let mut decoder = png::Decoder::new(BufReader::new(File::open(path).ok()?));
@@ -167,12 +176,15 @@ fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) {
 }
 
 fn write_if_changed(path: &Path, content: &str, root: &Path, changed: &mut Vec<String>) {
+    // Rewrite only when the text differs, so unchanged files keep their timestamps and `git diff`
+    // stays empty.
     if std::fs::read_to_string(path).ok().as_deref() != Some(content) {
         std::fs::write(path, content).unwrap();
         changed.push(relative(path, root));
     }
 }
 
+// The path relative to `rust/`, for the summary printed at the end.
 fn relative(path: &Path, root: &Path) -> String {
     let (path, root) = (path.canonicalize().unwrap(), root.canonicalize().unwrap());
     path.strip_prefix(&root)

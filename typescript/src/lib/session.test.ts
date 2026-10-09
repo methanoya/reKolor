@@ -1,6 +1,8 @@
-// The worker's rules with a controllable fake codec: the races from the code review, made
+// The worker's rules with a controllable fake codec: the races between overlapping requests, made
 // deterministic (a slow decode, an open while a PNG encodes, a failed replacement).
 
+// Unit tests (see `palette.test.ts` for how these test files work). They use the real WASM engine,
+// loaded from disk once before all tests (`beforeAll`); only the image codec is fake.
 import { beforeAll, describe, expect, test, vi } from 'vitest';
 import type { Decoded } from './codec';
 import { Engine } from './engine';
@@ -14,6 +16,7 @@ beforeAll(async () => {
   palette = await pantoneJson();
 });
 
+// The value of an ok outcome; an error outcome fails the test with its message.
 const value = <T>(outcome: AppOutcome<T>): T => {
   if (outcome.status === 'error')
     throw new Error(`${outcome.error.kind}: ${outcome.error.message}`);
@@ -27,6 +30,9 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+// A stand-in bitmap: `vi.fn()` is a mock function that records its calls, so a test can check that
+// the session closed a bitmap it no longer needed. `as unknown as ImageBitmap` tells the compiler
+// to treat this small object as a bitmap.
 const fakeBitmap = () => ({ close: vi.fn() }) as unknown as ImageBitmap;
 
 const WHITE = { r: 255, g: 255, b: 255 };

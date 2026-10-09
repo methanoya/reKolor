@@ -7,6 +7,9 @@
 //! Changing anything here changes the inputs, so the baseline in `testdata/baseline/` must be
 //! re-recorded in the same change.
 
+// Each program that includes this file uses only some of its functions; `allow(dead_code)`
+// silences the compiler's "never used" warnings for the rest. (`#!` applies an attribute to the
+// enclosing module, here the whole file.)
 #![allow(dead_code)]
 
 /// An RGBA8 image: row-major, 4 bytes per pixel, straight (not premultiplied) alpha.
@@ -25,6 +28,7 @@ pub struct MappingSet {
     pub pairs: &'static [([u8; 3], [u8; 3])],
 }
 
+// The mapping sets every fixture is recolored with; the baseline has one PNG per pair.
 pub const MAPPING_SETS: &[MappingSet] = &[
     // No picks at all.
     MappingSet {
@@ -83,6 +87,7 @@ pub fn fixtures() -> Vec<Fixture> {
     ]
 }
 
+// Look up a set or a fixture by name; an unknown name is a bug in the test, so it panics.
 pub fn mapping_set(name: &str) -> MappingSet {
     *MAPPING_SETS
         .iter()
@@ -97,6 +102,8 @@ pub fn fixture(name: &str) -> Fixture {
         .unwrap_or_else(|| panic!("unknown fixture {name}"))
 }
 
+// Builds a fixture by calling `pixel(x, y)` for every position, row by row.
+// `impl Fn(u32, u32) -> [u8; 4]` accepts any function or closure with that signature.
 fn image(
     name: &'static str,
     width: u32,
@@ -119,6 +126,7 @@ fn image(
 
 /// Every alpha value 0..=255 (one column each) on several colors, including fully transparent.
 fn alpha_ramp() -> Fixture {
+    // A constant inside a function: an array of eight RGB colors (`[[u8; 3]; 8]`).
     const ROWS: [[u8; 3]; 8] = [
         [230, 76, 60],
         [255, 184, 0],
@@ -148,6 +156,7 @@ fn edges() -> Fixture {
     };
     image("edges", 96, 96, |x, y| {
         let (x, y) = (x as i32, y as i32);
+        // Squared distance from the disc's center (40, 40); comparing squares avoids a square root.
         let d2 = (x - 40).pow(2) + (y - 40).pow(2);
         if (70..76).contains(&y) {
             let [r, g, b] = DARK;
@@ -206,6 +215,8 @@ fn gradient() -> Fixture {
 fn noise() -> Fixture {
     const ALPHAS: [u8; 8] = [0, 1, 64, 127, 128, 200, 255, 255];
     let (width, height) = (128u32, 96u32);
+    // A tiny pseudo-random generator (xorshift): the same seed always gives the same "random"
+    // pixels, on every machine and target. `_` in a number literal is only a digit separator.
     let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
     let mut rgba = Vec::with_capacity((width * height * 4) as usize);
     for _ in 0..width * height {
@@ -228,8 +239,8 @@ fn noise() -> Fixture {
 }
 
 /// Colors for the Pantone suggestion snapshot: a 16-level grid (0, 17, …, 255 per channel; 4,096
-/// colors) plus 1,000 further distinct colors off the grid, from a SplitMix64 sequence using its high
-/// bits.
+/// colors) plus 1,000 further distinct colors off the grid, from a SplitMix64 sequence using its
+/// high bits.
 pub fn suggestion_colors() -> Vec<[u8; 3]> {
     let mut colors: Vec<[u8; 3]> = Vec::with_capacity(5096);
     for r in (0..=255u16).step_by(17) {
@@ -242,6 +253,8 @@ pub fn suggestion_colors() -> Vec<[u8; 3]> {
     let mut seen: std::collections::HashSet<[u8; 3]> = colors.iter().copied().collect();
     let mut state: u64 = 0x5eed_c0de_0000_0001;
     while colors.len() < 4096 + 1000 {
+        // SplitMix64, a well-known simple generator; `wrapping_*` arithmetic wraps around on
+        // overflow instead of panicking (which debug builds would do for plain `+` and `*`).
         state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
         let mut z = state;
         z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
@@ -262,6 +275,10 @@ fn transparent() -> Fixture {
     })
 }
 
+// The ΔE fingerprint: ΔE for 100,000 generated color pairs, reduced to one hash. Floating-point
+// math can differ slightly between compilers and CPUs; matching the recorded hash proves the native
+// and WASM builds compute every ΔE to the exact same bits, so ties between inks resolve the same
+// way in the CLI and in the browser.
 /// Seed of the ΔE fingerprint corpus.
 pub const FINGERPRINT_SEED: u64 = 0x5eed;
 /// Number of color pairs in the ΔE fingerprint.
@@ -296,6 +313,7 @@ pub fn delta_e_fingerprint(delta_e: impl Fn([u8; 3], [u8; 3]) -> f32) -> String 
         z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
         z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
         z ^= z >> 31;
+        // The 64-bit word as 8 bytes (little-endian); bytes 0–2 and 3–5 become the two colors.
         let b = z.to_le_bytes();
         for byte in delta_e([b[0], b[1], b[2]], [b[3], b[4], b[5]])
             .to_bits()
@@ -304,6 +322,7 @@ pub fn delta_e_fingerprint(delta_e: impl Fn([u8; 3], [u8; 3]) -> f32) -> String 
             hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
         }
     }
+    // A trailing `\` in a string literal continues it on the next line, skipping the indentation.
     let mut out = format!(
         "# ΔE fingerprint, format 1: {FINGERPRINT_PAIRS} SplitMix64 pairs from seed \
          {FINGERPRINT_SEED:#x}, FNV-1a 64 over f32 bits (see generator.rs)\n\

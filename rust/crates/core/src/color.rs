@@ -1,7 +1,11 @@
+// Color types and color math. `use` brings names from other crates or modules into scope; here
+// from the `palette` crate (color science), not to be confused with this crate's own `palette.rs`
+// (the list of inks).
 use palette::color_difference::Ciede2000;
 use palette::white_point::D65;
 use palette::{FromColor, Srgb};
 
+// sRGB is the standard color space of screens and image files; each channel is 0–255 (`u8`).
 /// An sRGB color, 8 bits per channel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Rgb8 {
@@ -11,20 +15,26 @@ pub struct Rgb8 {
 }
 
 impl Rgb8 {
+    // An associated constant, used as `Rgb8::WHITE`.
     /// The default material: compositing over it is the behavior before the material color.
     pub const WHITE: Self = Self::new(255, 255, 255);
 
+    // `const fn`: can also run at compile time, so it can build constants like `WHITE` above.
     pub const fn new(r: u8, g: u8, b: u8) -> Self {
         Self { r, g, b }
     }
 }
 
+// Implementing the standard `From` trait (a trait is like an interface) lets callers convert a
+// 3-byte array with `Rgb8::from([r, g, b])` or `[r, g, b].into()`. The parameter `[r, g, b]`
+// unpacks the array into three variables right in the signature ("destructuring").
 impl From<[u8; 3]> for Rgb8 {
     fn from([r, g, b]: [u8; 3]) -> Self {
         Self { r, g, b }
     }
 }
 
+// The same with an alpha (opacity) channel: 0 is fully transparent, 255 fully opaque.
 /// An sRGB color with straight (not premultiplied) alpha, 8 bits per channel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Rgba8 {
@@ -46,6 +56,7 @@ impl From<[u8; 4]> for Rgba8 {
     }
 }
 
+// The parameter `Rgba8 { r, g, b, a }` destructures the pixel into its four channels.
 /// Composites a pixel over the material color (the garment or substrate), per channel
 /// `(a·c + (255 − a)·m) / 255`, truncating. Mixes the stored (encoded) sRGB values, not linear
 /// light. `a = 255` gives the pixel's color and `a = 0` the material, whatever RGB a transparent
@@ -54,9 +65,12 @@ impl From<[u8; 4]> for Rgba8 {
 /// Over [`Rgb8::WHITE`] this is exactly the existing formula `(255 − a) + a·c / 255`, since
 /// `255·(255 − a)` divides by 255, so white reproduces the behavior from before the material.
 pub fn composite(Rgba8 { r, g, b, a }: Rgba8, material: Rgb8) -> Rgb8 {
+    // Widen to 32 bits first: `a * c` can reach 255 × 255, which doesn't fit in a `u8`.
     let a = u32::from(a);
     // The sum is at most a·255 + (255 − a)·255 = 255·255 (the terms share `a`), so the quotient
     // fits in a u8.
+    // `|c, m| ...` is a closure (an inline function) that captures `a` from the line above;
+    // `as u8` converts back to a byte (it would truncate, but the result always fits, see above).
     let channel = |c: u8, m: u8| ((a * u32::from(c) + (255 - a) * u32::from(m)) / 255) as u8;
     Rgb8::new(
         channel(r, material.r),
@@ -65,14 +79,22 @@ pub fn composite(Rgba8 { r, g, b, a }: Rgba8, material: Rgb8) -> Rgb8 {
     )
 }
 
+// CIE Lab describes colors the way people perceive them: L is lightness, a is green–red, b is
+// blue–yellow. Distances in Lab match perceived differences far better than distances in RGB, which
+// is why the engine converts colors to Lab before comparing them. D65 is the standard daylight
+// white the conversion is relative to. `type` gives an existing type a shorter name.
 /// CIE L\*a\*b\* with the D65 white point, in `f32` (the `palette` crate's type).
 pub type Lab = palette::Lab<D65, f32>;
 
+// `into_format::<f32>()` scales the 0–255 bytes to 0.0–1.0 floats, which `palette` expects.
 /// Converts an (encoded, not linear) sRGB color to Lab.
 pub fn lab(Rgb8 { r, g, b }: Rgb8) -> Lab {
     Lab::from_color(Srgb::new(r, g, b).into_format::<f32>())
 }
 
+// CIEDE2000 is the standard formula for "how different do these two colors look" (ΔE). About 1
+// is the smallest difference most people notice; the engine always picks the ink with the smallest
+// ΔE to a pixel.
 /// CIEDE2000 color difference between two Lab colors.
 ///
 /// Computed by `palette` with its `libm` backend, i.e. the same float code on every target. For Lab
@@ -81,6 +103,8 @@ pub fn lab(Rgb8 { r, g, b }: Rgb8) -> Lab {
 /// `testdata/baseline/delta-e-fingerprint.tsv`. Other Lab values (e.g. out of the sRGB gamut) are
 /// only checked within `1e-4` against the Sharma reference data, on each target separately.
 pub fn delta_e_2000_lab(x: Lab, y: Lab) -> f32 {
+    // `difference` comes from the `Ciede2000` trait imported at the top: importing a trait makes
+    // its methods available on the types that implement it.
     x.difference(y)
 }
 

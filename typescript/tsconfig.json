@@ -1,18 +1,32 @@
+// TypeScript compiler settings for the web app, its tests and its config files. TypeScript reads
+// this file as JSON with comments. Nothing is compiled from here (`noEmit`): Vite strips the types
+// when it builds, and `npm run check` (svelte-check) type-checks `.ts` and `.svelte` files.
 {
   "compilerOptions": {
+    // Modern JavaScript and ES modules, with imports resolved the way Vite resolves them.
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    // Built-in APIs the code may use: modern JavaScript, the browser (DOM), and Web Worker types.
+    // `types` adds Vite's additions (such as `import.meta.env` and `?url` imports) and Node.js's
+    // APIs (for the config files and scripts).
     "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker.ImportScripts"],
     "types": ["vite/client", "node"],
+    // The strictest checks: `strict` (no implicit `any`, null checks, …), indexing an array may
+    // return `undefined`, and an optional field may be missing but not explicitly `undefined`.
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
+    // Imports used only as types must say so (`import type`), so the build can drop them safely
+    // file by file.
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
     "noEmit": true,
+    // Allows `import ... from './file.ts'` (Vite and Node.js both accept the extension).
     "allowImportingTsExtensions": true,
+    // Don't type-check installed packages' declaration files (faster; they're not ours).
     "skipLibCheck": true,
+    // Type-check the plain JavaScript files too (`eslint.config.js`, `scripts/smoke.mjs`, …).
     "allowJs": true,
     "checkJs": true
   },

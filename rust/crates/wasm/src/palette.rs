@@ -1,3 +1,5 @@
+// The ink palette as a JavaScript class (`Palette`), created once at startup from
+// `palettes/pantone.json` and then passed to `SourceImage.pick` and the config functions.
 use rekolor_core as core;
 use tsify::Ts;
 use wasm_bindgen::prelude::*;
@@ -14,6 +16,7 @@ extern "C" {
     pub type PaletteOutcome;
 }
 
+// Wraps the core palette; `inner` is private, so JavaScript can only use the methods below.
 /// A palette kept on the WASM side, with Lab values computed once.
 #[wasm_bindgen]
 #[derive(Debug)]
@@ -21,6 +24,7 @@ pub struct Palette {
     inner: core::Palette,
 }
 
+// Methods JavaScript can call; see `SourceImage` in `image.rs` for the same patterns.
 #[wasm_bindgen]
 impl Palette {
     /// Creates a palette from ordered entries (e.g. `palettes/pantone.json` converted with
@@ -56,6 +60,7 @@ impl Palette {
     /// Up to `k` entries ordered by distance; ties go to the earlier entry. `k` must be a whole
     /// number from 0 to 2^32 − 1.
     pub fn nearest(&self, color: Ts<Rgb>, k: f64) -> NearestOutcome {
+        // Validate `k`, then the color; convert each core match into its TypeScript-facing form.
         let outcome = whole_u32("k", k).and_then(|k| {
             let c = color.to_rust().map_err(ErrorInfo::from)?;
             Ok(PaletteMatches {
@@ -71,6 +76,7 @@ impl Palette {
     }
 }
 
+// Rust-only methods (no `#[wasm_bindgen]` on this block).
 impl Palette {
     /// Rust-side constructor (not exported); used by `create` and by tests.
     pub fn from_data(data: PaletteData) -> Result<Palette, ErrorInfo> {
@@ -84,6 +90,7 @@ impl Palette {
         })
     }
 
+    // The wrapped core palette, for the other modules of this crate.
     pub(crate) fn core(&self) -> &core::Palette {
         &self.inner
     }

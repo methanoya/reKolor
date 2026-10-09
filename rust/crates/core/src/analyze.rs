@@ -1,3 +1,5 @@
+// Image statistics shown in the app's toolbar and printed by `rekolor analyze`: size and how many
+// distinct colors the image has. `HashSet` is a set: it keeps each distinct value once.
 use std::collections::HashSet;
 
 use crate::{ImageRef, Rgb8, composite};
@@ -17,6 +19,8 @@ pub struct ImageStats {
 
 /// Size and color counts; `colors` depends on the material, `rgba_colors` doesn't.
 pub fn analyze(image: ImageRef<'_>, material: Rgb8) -> ImageStats {
+    // Collect every pixel into a set; its size is the number of distinct RGBA values. `HashSet<_>`
+    // lets the compiler infer the element type (`Rgba8`).
     let rgba: HashSet<_> = image.pixels().collect();
     ImageStats {
         width: image.width(),
@@ -30,12 +34,17 @@ pub fn analyze(image: ImageRef<'_>, material: Rgb8) -> ImageStats {
 /// memory: one bit per possible color (2^24 bits = 2 MiB), whatever the image. [`analyze`] also
 /// counts RGBA values, which needs memory per distinct value; this is the bounded part on its own.
 pub fn color_count(image: ImageRef<'_>, material: Rgb8) -> u64 {
+    // A bitmap with one bit per possible RGB color: 2^24 colors / 64 bits per `u64` = 2^18 words.
+    // `let mut` declares a variable that can change (Rust variables are read-only by default).
     let mut seen = vec![0u64; 1 << 18];
     let mut count = 0;
     for p in image.pixels() {
         let c = composite(p, material);
+        // The color as one number 0..2^24 (red in the high bits), then which word and which bit
+        // hold it: `key >> 6` divides by 64, `key & 63` is the remainder.
         let key = (usize::from(c.r) << 16) | (usize::from(c.g) << 8) | usize::from(c.b);
         let (word, bit) = (key >> 6, 1u64 << (key & 63));
+        // First time this color is seen: set its bit and count it.
         if seen[word] & bit == 0 {
             seen[word] |= bit;
             count += 1;

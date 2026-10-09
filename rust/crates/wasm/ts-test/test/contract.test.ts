@@ -1,6 +1,10 @@
 // The rekolor-wasm contract as an app sees it, at runtime.
 // Type-level guarantees are in `types.check.ts` (checked by `tsc`, not run).
 
+// Vitest basics: `describe` groups tests, `test(name, fn)` defines one, and `expect(value)`
+// checks it (`toBe` compares with `===`, `toEqual` compares contents, `toMatchObject` checks a
+// subset of fields). A test fails when an expectation fails or an error is thrown. `beforeAll`
+// runs once before the tests, here to load the WASM module.
 import { readFile } from 'node:fs/promises';
 import { beforeAll, describe, expect, test } from 'vitest';
 import {
@@ -21,6 +25,9 @@ const PANTONE_285: Rgb = { r: 58, g: 117, b: 196 };
 const WHITE: Rgb = { r: 255, g: 255, b: 255 };
 const BLACK: Rgb = { r: 0, g: 0, b: 0 };
 
+// `async` functions return a `Promise`; `await` waits for one. `as Record<...>` tells TypeScript
+// the parsed JSON's shape (`JSON.parse` returns `any`). `new URL(path, import.meta.url)` resolves a
+// path relative to this file.
 /** `palettes/pantone.json` converted the way the app will do it: `Object.entries` keeps file order. */
 async function pantoneData(): Promise<PaletteData> {
   const url = new URL('../../../../../palettes/pantone.json', import.meta.url);
@@ -61,6 +68,8 @@ describe('Palette', () => {
     // Pantone 303 and 547 share an RGB value; file order decides, so 303 comes first.
     const twins = unwrap(palette.nearest({ r: 0, g: 63, b: 84 }, 2)).matches;
     expect(twins.map((m) => m.name)).toEqual(['Pantone 303', 'Pantone 547']);
+    // `!` asserts "not undefined" to the compiler (array indexing may return `undefined` under
+    // `noUncheckedIndexedAccess`).
     expect(twins[0]!.index).toBeLessThan(twins[1]!.index);
     // The suggestion follows the same rule.
     expect(unwrap(palette.suggest({ r: 0, g: 63, b: 84 })).name).toBe('Pantone 303');
@@ -71,6 +80,8 @@ describe('Palette', () => {
     const empty = Palette.create({ entries: [] });
     expect(empty.status === 'error' && empty.error.kind).toBe('emptyPalette');
 
+    // `as unknown as PaletteData` deliberately bypasses the type check to send malformed data, as
+    // plain JavaScript could.
     const malformed = Palette.create({ entries: 'nope' } as unknown as PaletteData);
     expect(malformed.status === 'error' && malformed.error.kind).toBe('invalidInput');
   });
@@ -98,6 +109,7 @@ describe('SourceImage', () => {
     const out = new Uint8Array(8);
     const stats = unwrap(image.recolor(redToBlue, out));
     // Red is an exact source match; transparent is composited to white, and the only ink is blue.
+    // `[...out]` copies the typed array into a plain array for a readable comparison.
     expect([...out]).toEqual([58, 117, 196, 255, 58, 117, 196, 255]);
     expect(stats).toEqual({ exact: 1, nearest: 1 });
   });
@@ -247,6 +259,8 @@ describe('SourceImage', () => {
 
   test('objects are disposable', () => {
     const image = redAndTransparent();
+    // `Symbol.dispose` is what a `using image = ...` declaration calls automatically at the end of
+    // its block.
     expect(typeof image[Symbol.dispose]).toBe('function');
     image[Symbol.dispose]();
     expect(() => image.analyze(WHITE)).toThrow();

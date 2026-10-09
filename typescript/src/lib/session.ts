@@ -28,12 +28,15 @@ import type { Engine, ImageSize } from './engine';
 import { err, ok, type AppOutcome } from './outcome';
 import { sameRgb } from './picks';
 
+// What the session needs from an image codec: in the worker, the browser's (`codec.ts`); in Node
+// tests, a fake one whose promises the test resolves when it wants.
 export interface Codec {
   decode(file: Blob): Promise<AppOutcome<Decoded>>;
   toBitmap(rgba: Uint8Array<ArrayBuffer>, width: number, height: number): Promise<ImageBitmap>;
   encodePng(rgba: Uint8Array<ArrayBuffer>, width: number, height: number): Promise<Blob>;
 }
 
+// `extends` adds fields to another interface: an `Opened` has `width` and `height` too.
 export interface Opened extends ImageSize {
   generation: number;
   /** The decoded image, for display. */
@@ -58,6 +61,7 @@ export interface Rematched {
   alternatives?: PaletteMatch[];
 }
 
+// The answer for a request that is no longer current; the main thread ignores it quietly.
 const superseded = <T>(): AppOutcome<T> =>
   err('superseded', 'a newer image or change replaced this request');
 
@@ -78,11 +82,15 @@ export class Session {
 
   /** Decodes and opens an image file as `generation` (which must be newer than any before). */
   async open(file: Blob, generation: number): Promise<AppOutcome<Opened>> {
+    // Remember the newest request before awaiting: while this decode runs, a newer `open` may
+    // start, and only the newest may commit.
     this.#requested = Math.max(this.#requested, generation);
     const decoded = await this.#codec.decode(file);
     if (decoded.status === 'error') return decoded;
+    // Unpacks the decoded fields into variables ("destructuring").
     const { rgba, width, height, bitmap } = decoded.value;
     if (generation !== this.#requested) {
+      // Not used: release the bitmap's memory now rather than waiting for garbage collection.
       bitmap.close();
       return superseded();
     }
@@ -113,6 +121,7 @@ export class Session {
     for (const pick of picks) {
       const matching = this.#engine.composite(pick.pixel, material);
       if (matching.status === 'error') return matching;
+      // Same color on the new material (for example an opaque pixel): keep the pick's ink as it is.
       if (sameRgb(matching.value, pick.matching)) {
         rematched.push({ matching: matching.value });
         continue;
@@ -160,6 +169,7 @@ export class Session {
     return this.#engine.parseConfig(text);
   }
 
+  // The return type uses `A & B`, an intersection type: a value with all fields of both.
   /**
    * Resolves a config section on the material (the config's), with the ink alternatives for each
    * pick (the nearest ones, plus the config's own ink if it isn't among them).

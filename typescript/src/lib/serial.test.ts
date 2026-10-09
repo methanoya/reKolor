@@ -1,3 +1,8 @@
+// Unit tests for `serial.ts` (see `palette.test.ts` for how these test files work). Tasks wait on
+// promises the test resolves itself (`release`), so the order of events is deterministic.
+// `let release!: () => void` declares a variable that is assigned later (inside the promise), and
+// the `!` tells TypeScript that it will be. `await new Promise((r) => setTimeout(r, 0))` waits one
+// timer tick, letting already-scheduled promise callbacks run first.
 import { describe, expect, test } from 'vitest';
 import { Serial } from './serial';
 
@@ -20,6 +25,7 @@ describe('Serial', () => {
 
   test('a failing task does not block the next one', async () => {
     const serial = new Serial();
+    // `.rejects`/`.resolves` check the outcome of a promise.
     await expect(serial.run(() => Promise.reject(new Error('boom')))).rejects.toThrow('boom');
     await expect(serial.run(() => 42)).resolves.toBe(42);
   });

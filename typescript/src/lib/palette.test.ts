@@ -1,3 +1,6 @@
+// Unit tests, run in Node.js by `npm test` (Vitest). `describe` groups tests, `test` defines one,
+// and `expect(value).toEqual(...)` (or `.toThrow(...)`, …) checks a result; a failed check fails
+// the test. A test file sits next to the module it tests (`palette.ts`).
 import { describe, expect, test } from 'vitest';
 import { parsePaletteJson } from './palette';
 import { pantoneJson } from './test-wasm';

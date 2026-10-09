@@ -1,5 +1,9 @@
 //! The reKolor command-line tool.
 
+// The program's entry point: argument parsing and the four commands. Run `rekolor --help` (or
+// `cargo run -p rekolor-cli -- --help`) for the generated help text.
+//
+// `use rekolor_cli::...` imports this crate's own library half (`lib.rs`).
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -12,9 +16,14 @@ use rekolor_cli::{discover, generate, palette_file};
 use rekolor_core::{Mapping, MaterialRange, Palette, Rgb8, analyze, recolor_with_ranges};
 use rekolor_io::DecodedImage;
 
+// `[u32; 3]`: a fixed array of three numbers.
 /// Palette sizes of the golden set.
 const GOLDEN_SIZES: [u32; 3] = [3, 7, 16];
 
+// clap builds the whole command-line parser from these annotated types: struct fields become
+// options, `///` doc comments become the help text, and `#[arg(...)]`/`#[command(...)]` tweak
+// names and rules. A field of type `Option<T>` is an optional flag; `Vec<T>` can be repeated.
+// `global = true` lets `--palette` appear after any subcommand.
 #[derive(Parser)]
 #[command(name = "rekolor", version, about = "Limited-palette print previews")]
 struct Cli {
@@ -26,6 +35,8 @@ struct Cli {
     command: Command,
 }
 
+// The subcommands: `rekolor recolor`, `rekolor analyze`, `rekolor palettes generate`,
+// `rekolor golden update`. An enum variant can carry fields, like a struct.
 #[derive(Subcommand)]
 enum Command {
     /// Recolor an image with picks from a palette config or given on the command line.
@@ -45,6 +56,8 @@ enum Command {
     Golden(GoldenCommand),
 }
 
+// `requires`, `conflicts_with` and `required_unless_present` let clap reject invalid combinations
+// before the program runs. `value_parser = parse_rgb` converts the text with the function below.
 #[derive(Args)]
 struct RecolorArgs {
     input: PathBuf,
@@ -90,6 +103,9 @@ enum GoldenCommand {
     Update { dir: PathBuf },
 }
 
+// Program start. Logging is off except warnings unless `RUST_LOG` says otherwise (e.g.
+// `RUST_LOG=debug`). Errors print as `error: …`, with `{e:#}` adding the chain of causes, and the
+// exit code tells scripts it failed.
 fn main() -> ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     match run(Cli::parse()) {
@@ -101,6 +117,8 @@ fn main() -> ExitCode {
     }
 }
 
+// `palette_path` is a closure called only by the commands that need a palette, so `analyze` works
+// without one.
 fn run(cli: Cli) -> Result<()> {
     let palette_path = || -> Result<PathBuf> {
         match &cli.palette {
@@ -126,6 +144,8 @@ fn run(cli: Cli) -> Result<()> {
         }
         Command::Recolor(args) => {
             let palette = palette_file::load(&palette_path()?)?;
+            // Either the picks come from a config file (`--config` and `--size`) or from `--pick`
+            // options.
             let (mappings, material, ranges) = match (&args.config, args.size) {
                 (Some(path), Some(size)) => {
                     let config = config::load(path)?;
@@ -143,8 +163,12 @@ fn run(cli: Cli) -> Result<()> {
                         .pick
                         .iter()
                         .map(|p| parse_pick(p, &palette))
+                        // Collecting into a `Result` gives the list if every pick parsed, or the
+                        // first error. `::<...>` ("turbofish") names the type to collect into.
                         .collect::<Result<_>>()?;
                     let material = args.material.unwrap_or(Rgb8::WHITE);
+                    // A config with no sections, built only to reuse its validation and range
+                    // conversion for the `--unprinted` options.
                     let unprinted = PaletteConfig {
                         material: [material.r, material.g, material.b],
                         unprinted: args.unprinted.clone(),
@@ -173,7 +197,9 @@ fn run(cli: Cli) -> Result<()> {
             force,
             material,
         }) => {
-            // A chosen material leaves its own color unprinted, as in the app.
+            // A chosen material leaves its own color unprinted, as in the app. `Option` → list with
+            // zero or one entry: `map` builds the entry if there is a material, and
+            // `into_iter().collect()` turns `Some(x)` into `[x]` and `None` into `[]`.
             let unprinted = material
                 .map(|_| Unprinted::Material {
                     delta_e: DEFAULT_UNPRINTED_DELTA_E,
@@ -189,6 +215,8 @@ fn run(cli: Cli) -> Result<()> {
                     continue;
                 }
                 let image = decode(&input)?;
+                // Pick once for the largest size; each smaller size takes the first N of those
+                // picks.
                 let max = *GOLDEN_SIZES.iter().max().expect("sizes") as usize;
                 let picks = generate::picks(image.view(), &palette, material, max);
                 let config = PaletteConfig {
@@ -239,6 +267,8 @@ fn run(cli: Cli) -> Result<()> {
                     eprintln!("{}: no config, skipped", input.display());
                     continue;
                 }
+                // `and_then` runs the closure only if loading succeeded; any error inside it
+                // short-circuits.
                 let checked = config::load(&config_path).and_then(|config| {
                     let material = Rgb8::from(config.material);
                     let sizes = config
@@ -259,6 +289,8 @@ fn run(cli: Cli) -> Result<()> {
                         ranges,
                         sizes,
                     }),
+                    // Any failure: collect both errors (if both failed); `.err()` gives
+                    // `Some(error)` or `None`, and `flatten` drops the `None`s.
                     (checked, decodable) => problems.extend(
                         [checked.err(), decodable.err()]
                             .into_iter()
@@ -274,6 +306,7 @@ fn run(cli: Cli) -> Result<()> {
                 );
             }
             // Pass 2: render and write.
+            // The `for` pattern unpacks each job's fields into variables.
             for GoldenJob {
                 input,
                 material,
@@ -293,6 +326,7 @@ fn run(cli: Cli) -> Result<()> {
     }
 }
 
+// `Vec<(u32, Vec<Mapping>)>`: a list of (palette size, mappings for that size) pairs.
 /// One image of a `golden update`, checked in pass 1: its config's material and its outputs per
 /// palette size.
 struct GoldenJob {
@@ -312,6 +346,7 @@ fn decode(path: &Path) -> Result<DecodedImage> {
     Ok(image)
 }
 
+// Recolors into a new buffer of the same size and writes it as PNG.
 fn recolor_to_file(
     image: &DecodedImage,
     mappings: &[Mapping],
@@ -336,11 +371,15 @@ fn describe(material: Rgb8) -> String {
 
 /// Parses "R,G,B" (a pick's color, `--material`).
 fn parse_rgb(text: &str) -> Result<Rgb8, String> {
+    // Split at commas and parse each part as a byte; `collect::<Result<_, _>>` fails if any part
+    // isn't a number 0–255.
     let channels: Vec<u8> = text
         .split(',')
         .map(|c| c.trim().parse::<u8>())
         .collect::<Result<_, _>>()
         .map_err(|_| "R,G,B must be numbers 0–255".to_string())?;
+    // Exactly three channels, or an error. `channels[..]` views the `Vec` as a slice, which can be
+    // matched against a fixed pattern like `[r, g, b]`.
     let [r, g, b] = channels[..] else {
         return Err("expected three channels R,G,B".into());
     };
@@ -350,6 +389,7 @@ fn parse_rgb(text: &str) -> Result<Rgb8, String> {
 /// Parses "R,G,B[,A]=ΔE" or "material=ΔE" (`--unprinted`); the ΔE range is checked with the
 /// config rules.
 fn parse_unprinted(text: &str) -> Result<Unprinted, String> {
+    // `split_once('=')` gives the parts before and after the first `=`, or `None` if there is none.
     let (color, delta_e) = text
         .split_once('=')
         .ok_or_else(|| "expected R,G,B[,A]=ΔE or material=ΔE".to_string())?;
@@ -365,6 +405,7 @@ fn parse_unprinted(text: &str) -> Result<Unprinted, String> {
         .map(|c| c.trim().parse::<u8>())
         .collect::<Result<_, _>>()
         .map_err(|_| "R,G,B[,A] must be numbers 0–255".to_string())?;
+    // Three channels mean opaque (alpha 255); four give the alpha too.
     let rgba = match channels[..] {
         [r, g, b] => [r, g, b, 255],
         [r, g, b, a] => [r, g, b, a],
@@ -378,6 +419,8 @@ fn parse_pick(text: &str, palette: &Palette) -> Result<Mapping> {
     let Some((color, ink)) = text.split_once('=') else {
         bail!("pick {text:?}: expected R,G,B=INK NAME");
     };
+    // `parse_rgb` returns a `String` error (as clap wants); `anyhow!` makes it an `anyhow::Error`
+    // with the pick's text added.
     let source = parse_rgb(color).map_err(|e| anyhow::anyhow!("pick {text:?}: {e}"))?;
     let ink = ink.trim();
     let entry = palette

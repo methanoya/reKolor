@@ -1,3 +1,6 @@
+// Picking: the user clicks a pixel in the original image; the engine reads that pixel, works out
+// the color recoloring will see (the pixel composited over the material) and suggests the
+// nearest ink.
 use crate::{Error, ImageRef, Palette, PaletteMatch, Rgb8, Rgba8, composite};
 
 /// Largest per-channel difference between the color the caller saw and the stored pixel that
@@ -31,6 +34,8 @@ pub struct ColorMismatch {
     pub max_channel_difference: u8,
 }
 
+// `Option<Rgba8>` is either `Some(color)` or `None` (Rust has no null). The lifetime `'p` ties the
+// returned suggestion to `palette`, since it borrows the palette's entry.
 /// Picks the pixel at image coordinates `(x, y)`, composites it over `material` and suggests a
 /// palette entry for the result.
 ///
@@ -44,8 +49,12 @@ pub fn pick<'p>(
     material: Rgb8,
     palette: &'p Palette,
 ) -> Result<Pick<'p>, Error> {
+    // `?` returns early with the error if the coordinates are outside the image.
     let pixel = image.pixel(x, y)?;
     let matching = composite(pixel, material);
+    // Only if the caller passed the color it saw: the largest difference over the four channels,
+    // and a warning if it exceeds the tolerance. `then_some(...)` gives `Some(warning)` when the
+    // condition is true and `None` otherwise.
     let mismatch = seen.and_then(|seen| {
         let max_channel_difference = [
             seen.r.abs_diff(pixel.r),
@@ -62,6 +71,7 @@ pub fn pick<'p>(
             max_channel_difference,
         })
     });
+    // `if let Some(m) = ...` runs the block only when there is a value, and names it `m`.
     if let Some(m) = &mismatch {
         log::warn!(
             "pick ({x}, {y}): seen {:?} differs from stored {:?} by {}",

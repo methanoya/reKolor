@@ -1,5 +1,8 @@
 //! `rekolor-io`: decoding, encoding and the decoder warnings.
 
+// An integration test (`cargo test -p rekolor-io`). The test images are built in memory with
+// the `image` crate's encoders, so no binary files are needed except the samples in the last test.
+// `#[path]` includes the shared test-data generator (see `rekolor-core`'s `tests/fingerprint.rs`).
 #[path = "../../../testdata/generator.rs"]
 mod generator;
 
@@ -34,6 +37,8 @@ fn png_with(
 
 /// Minimal EXIF (TIFF, big-endian) with a single Orientation tag.
 fn exif_orientation(value: u16) -> Vec<u8> {
+    // `b"..."` is a byte string (`&[u8]`), and `to_be_bytes()` gives a number's bytes in big-endian
+    // order, as the EXIF format stores them.
     let mut exif = b"MM\0\x2a".to_vec(); // big-endian TIFF header
     exif.extend_from_slice(&8u32.to_be_bytes()); // offset of the first IFD
     exif.extend_from_slice(&1u16.to_be_bytes()); // one entry
@@ -46,6 +51,7 @@ fn exif_orientation(value: u16) -> Vec<u8> {
     exif
 }
 
+// Two opaque test pixels: red and blue.
 const A: [u8; 4] = [255, 0, 0, 255];
 const B: [u8; 4] = [0, 0, 255, 255];
 
@@ -79,6 +85,8 @@ fn png_round_trip_is_lossless_for_every_fixture() {
 
 #[test]
 fn encode_checks_the_buffer_length() {
+    // `matches!(value, pattern)` checks the shape of a value, here the exact error variant, without
+    // comparing every field (`{ .. }` ignores them).
     assert!(matches!(
         encode_png(&[0; 7], 1, 2),
         Err(Error::InvalidImage(
@@ -89,6 +97,9 @@ fn encode_checks_the_buffer_length() {
 
 #[test]
 fn sixteen_bit_and_grayscale_are_converted_to_rgba8() {
+    // A 3×1 16-bit grayscale PNG must come out as 8-bit RGBA (65535 → 255, 32896 → 128).
+    // `ImageBuffer::<image::Luma<u16>, _>` names the pixel type explicitly; `_` lets the compiler
+    // infer the container type.
     let gray16 =
         image::ImageBuffer::<image::Luma<u16>, _>::from_raw(3, 1, vec![0, 32896, 65535]).unwrap();
     let mut png = Vec::new();
@@ -175,6 +186,7 @@ fn decode_errors_are_typed() {
 
     let missing = Path::new("/nonexistent/rekolor/missing.png");
     match decode_file(missing) {
+        // `other` in the next arm catches every other result, and prints it with `{other:?}`.
         Err(Error::Io { path, .. }) => assert_eq!(path, missing),
         other => panic!("expected an I/O error, got {other:?}"),
     }
@@ -212,6 +224,7 @@ fn tga_files_are_recognized_by_extension() {
     // TGA has no magic bytes, so content detection can't find it.
     assert!(matches!(decode(RED_TGA), Err(Error::UnknownFormat)));
 
+    // A fresh temporary folder, deleted automatically when `dir` goes out of scope.
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("red.tga");
     std::fs::write(&path, RED_TGA).unwrap();
@@ -225,6 +238,8 @@ fn tga_files_are_recognized_by_extension() {
     assert!(matches!(decode_file(&unknown), Err(Error::UnknownFormat)));
 }
 
+// Decodes every PNG and JPEG in `samples/`. `eprintln!` output is shown only when the test fails
+// or with `cargo test -- --nocapture`.
 #[test]
 fn every_sample_image_decodes() {
     let samples = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../samples"));

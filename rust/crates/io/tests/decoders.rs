@@ -3,6 +3,8 @@
 //! (`typescript/tests/browser/decoders.test.ts`). Regenerate with
 //! `cargo run --release -p rekolor-io --example update_decoder_fixtures`.
 
+// An integration test (`cargo test -p rekolor-io`). `references.tsv` has one tab-separated row
+// per fixture: name, file, width, height and the expected warnings.
 use std::path::Path;
 
 #[test]
@@ -12,6 +14,7 @@ fn decoder_fixtures_match_their_references() {
     let mut count = 0;
     for line in tsv.lines().filter(|l| !l.starts_with('#')) {
         let cols: Vec<&str> = line.split('\t').collect();
+        // Exactly five columns, unpacked into named variables; any other count is a broken file.
         let [name, file, width, height, warnings] = cols[..] else {
             panic!("bad line {line:?}");
         };
@@ -21,6 +24,7 @@ fn decoder_fixtures_match_their_references() {
             (width.to_string(), height.to_string()),
             "{name}: size"
         );
+        // `assert!` rather than `assert_eq!`, so a failure doesn't print two huge byte arrays.
         assert!(
             decoded.rgba() == std::fs::read(dir.join(format!("{name}.rgba"))).unwrap(),
             "{name}: pixels differ from {name}.rgba"

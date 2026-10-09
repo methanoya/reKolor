@@ -1,10 +1,14 @@
+// The ink palette (e.g. the Pantone list in `palettes/pantone.json`) and the search for the inks
+// nearest to a color.
 use crate::color::{Lab, delta_e_2000_lab, lab};
 use crate::{Error, Rgb8};
 
+// `&str` is a borrowed piece of text; a string literal like this one lives for the whole program.
 /// Entries whose name contains this are not real inks (`palettes/pantone.json` has
 /// "Pure White (non-palette)" and "Pure Black (non-palette)").
 pub const NON_PALETTE_MARKER: &str = "non-palette";
 
+// `String` is owned, growable text (unlike `&str`, which only borrows text).
 /// One named palette color, e.g. `"Pantone 1235"`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaletteEntry {
@@ -15,6 +19,8 @@ pub struct PaletteEntry {
 }
 
 impl PaletteEntry {
+    // `impl Into<String>` accepts anything convertible to a `String` (a `&str` or a `String`), so
+    // callers can pass `"Pantone 1235"` directly; `.into()` does the conversion.
     pub fn new(name: impl Into<String>, rgb: Rgb8) -> Self {
         let name = name.into();
         let non_palette = name.contains(NON_PALETTE_MARKER);
@@ -26,6 +32,8 @@ impl PaletteEntry {
     }
 }
 
+// The `<'a>` lifetime says the match borrows its entry from a `Palette`: a match can't outlive
+// the palette it came from, and no entry is copied.
 /// A palette entry matched to a color.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PaletteMatch<'a> {
@@ -35,6 +43,8 @@ pub struct PaletteMatch<'a> {
     pub delta_e: f32,
 }
 
+// `Vec<T>` is Rust's growable list (an array on the heap). The Lab value of each entry is computed
+// once here, because every color comparison needs it and the palette has hundreds of entries.
 /// An ordered list of named colors, with Lab values computed once.
 /// The order is the file order and decides ties.
 #[derive(Debug, Clone)]
@@ -48,10 +58,14 @@ impl Palette {
         if entries.is_empty() {
             return Err(Error::EmptyPalette);
         }
+        // `.iter().map(...).collect()` walks the entries, converts each, and gathers the results
+        // into a new `Vec` (the type comes from the `labs` field it is stored in).
         let labs = entries.iter().map(|e| lab(e.rgb)).collect();
         Ok(Self { entries, labs })
     }
 
+    // Read-only access to the entries; returning `&[...]` (a slice) lets callers read but not
+    // change them.
     pub fn entries(&self) -> &[PaletteEntry] {
         &self.entries
     }
@@ -60,24 +74,35 @@ impl Palette {
     /// preference for real inks over pure white/black). Ties go to the earlier entry.
     pub fn suggest(&self, color: Rgb8) -> PaletteMatch<'_> {
         self.distances(color)
+            // Keep the nearest so far; on an exact tie (`<`, not `<=`) the earlier entry stays, so
+            // file order decides ties.
             .reduce(|best, m| if m.delta_e < best.delta_e { m } else { best })
+            // `reduce` returns `None` for an empty list; `expect` would panic with this message,
+            // but `new` never builds an empty palette, so it can't happen.
             .expect("Palette::new rejects empty palettes")
     }
 
     /// Up to `k` entries ordered by CIEDE2000 distance; ties go to the earlier entry.
     pub fn nearest(&self, color: Rgb8, k: usize) -> Vec<PaletteMatch<'_>> {
         let mut matches: Vec<_> = self.distances(color).collect();
+        // Sort by ΔE, then by position for equal ΔE. `total_cmp` orders floats completely (it also
+        // defines where NaN goes), which a plain `<` can't.
         matches.sort_by(|a, b| a.delta_e.total_cmp(&b.delta_e).then(a.index.cmp(&b.index)));
         matches.truncate(k);
         matches
     }
 
+    // Every entry with its ΔE to `color`, in file order. `'_` lets the compiler infer the lifetime
+    // (the returned matches borrow from `self`). Not `pub`: a helper for the two methods above.
     fn distances(&self, color: Rgb8) -> impl Iterator<Item = PaletteMatch<'_>> {
         let color_lab = lab(color);
         self.entries
             .iter()
             .zip(&self.labs)
             .enumerate()
+            // `zip` pairs each entry with its Lab value, `enumerate` adds the position; `move`
+            // makes the closure take its own copy of `color_lab`, since the iterator outlives this
+            // function call.
             .map(move |(index, (entry, &entry_lab))| PaletteMatch {
                 index,
                 entry,

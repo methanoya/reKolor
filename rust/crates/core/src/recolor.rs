@@ -1,6 +1,11 @@
+// Recoloring: every pixel of the image becomes one of the chosen inks (or stays unprinted). This is
+// the heart of the engine; the web app calls it on every change through `rekolor-wasm`, and the CLI
+// calls it to write PNG files.
 use crate::color::{Lab, delta_e_2000_lab, lab};
 use crate::{Error, ImageRef, Rgb8, Rgba8, composite};
 
+// A pick as the engine sees it: the color the user clicked (composited over the material) and the
+// color of the ink chosen for it.
 /// One picked color and the ink that replaces it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Mapping {
@@ -19,6 +24,7 @@ pub struct MaterialRange {
     pub delta_e: f32,
 }
 
+// Counts of how each pixel was decided, for logs and tests. `Default` gives all zeros.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RecolorStats {
     /// Pixels whose composited color equals a mapping's source exactly.
@@ -29,6 +35,8 @@ pub struct RecolorStats {
     pub nearest: u64,
 }
 
+// `&[Mapping]` borrows a list of mappings; `&mut [u8]` borrows the output buffer for writing (only
+// one `&mut` borrow can exist at a time, so nothing else can touch `out` meanwhile).
 /// Recolors `image` into `out`, which must have the same length as the source buffer.
 ///
 /// Contract ([`Rgb8::WHITE`] as the material composites over white):
@@ -60,6 +68,7 @@ pub fn recolor_with_ranges(
     ranges: &[MaterialRange],
     out: &mut [u8],
 ) -> Result<RecolorStats, Error> {
+    // The output has the same layout as the input: 4 bytes per pixel.
     let input = image.as_bytes();
     if out.len() != input.len() {
         return Err(Error::OutputLength {
@@ -68,18 +77,28 @@ pub fn recolor_with_ranges(
         });
     }
 
+    // Convert every ink and every range color to Lab once, up front: the loop below compares each
+    // pixel against them, and converting inside the loop would repeat that work millions of times.
+    // `(Mapping, Lab)` is a tuple, an unnamed pair of values.
     let inks: Vec<(Mapping, Lab)> = mappings.iter().map(|&m| (m, lab(m.ink))).collect();
     let ranges: Vec<(Lab, f32)> = ranges
         .iter()
         .map(|r| (lab(composite(r.pixel, material)), r.delta_e))
         .collect();
     let pixel_count = input.len() / 4;
+    // The memo (a cache of answers per color) only pays off for larger images; `.then(|| ...)`
+    // builds it (`Some(table)`) only when the condition is true, and leaves `None` otherwise.
     let mut memo =
         (pixel_count > MEMO_MIN_PIXELS && !inks.is_empty() && inks.len() < MEMO_MAX_INKS)
             .then(|| vec![0u16; 1 << 24]);
     let mut stats = RecolorStats::default();
+    // Walk input pixels and output pixels side by side: `zip` pairs them up, and
+    // `as_chunks_mut::<4>` views the output bytes as 4-byte pixels that can be written in place.
     for (pixel, dst) in image.pixels().zip(out.as_chunks_mut::<4>().0) {
         let color = composite(pixel, material);
+        // `match` picks the first arm whose pattern fits (here: memo or no memo, and for no memo
+        // whether the color is in an unprinted range). `None if ... =>` is an arm with an extra
+        // condition.
         let decided = match memo.as_deref_mut() {
             Some(memo) => memoized(memo, &inks, &ranges, color),
             None if in_range(&ranges, color) => Decided::Unprinted,
@@ -90,6 +109,8 @@ pub fn recolor_with_ranges(
         };
         match decided {
             Decided::Ink { ink, exact } => {
+                // `*dst = ...` writes through the mutable reference into the output buffer; 255 =
+                // fully opaque.
                 *dst = [ink.r, ink.g, ink.b, 255];
                 if exact {
                     stats.exact += 1;
@@ -103,6 +124,7 @@ pub fn recolor_with_ranges(
             }
         }
     }
+    // Shown only when debug logging is on (e.g. `RUST_LOG=debug` for the CLI).
     log::debug!(
         "recolor: {}×{} on {:?}, {} mappings, {} ranges, exact {}, unprinted {}, nearest {}",
         image.width(),
@@ -117,15 +139,20 @@ pub fn recolor_with_ranges(
     Ok(stats)
 }
 
+// `1 << 16` is 2^16 = 65,536 (a left shift doubles the number per step).
 /// Images above this many pixels remember each color's answer (below it, the 32 MiB table costs
 /// more than it saves).
 const MEMO_MIN_PIXELS: usize = 1 << 16;
+// A memo entry is one `u16`. Its low 15 bits are 0 (not computed yet), 0x7fff (`MEMO_UNPRINTED`: in
+// an unprinted range) or "mapping index + 1"; the top bit (`0x8000`) marks an exact match. So the
+// memo is used only with fewer than 0x7fff mappings, which keeps 0x7fff free for "unprinted".
 /// The memo stores `mapping index + 1` in 15 bits.
 const MEMO_MAX_INKS: usize = 0x7fff;
 const MEMO_EXACT: u16 = 0x8000;
 /// Unprinted: `0x7fff` is never `index + 1` (at most `MEMO_MAX_INKS - 1` mappings).
 const MEMO_UNPRINTED: u16 = 0x7fff;
 
+// Private helper type (no `pub`): the per-pixel answer used inside this file.
 /// What a composited color becomes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Decided {
@@ -135,6 +162,7 @@ enum Decided {
     Unprinted,
 }
 
+// `any` is true as soon as one range contains the color (it stops at the first).
 /// Whether a composited color is within a material range.
 fn in_range(ranges: &[(Lab, f32)], color: Rgb8) -> bool {
     if ranges.is_empty() {
@@ -157,11 +185,13 @@ fn memoized(
     ranges: &[(Lab, f32)],
     color: Rgb8,
 ) -> Decided {
+    // The color as one number 0..2^24, used as the index into the memo table.
     let key = (usize::from(color.r) << 16) | (usize::from(color.g) << 8) | usize::from(color.b);
     let entry = memo[key];
     if entry == MEMO_UNPRINTED {
         return Decided::Unprinted;
     }
+    // Already computed: decode the stored index (`entry & !MEMO_EXACT` clears the top bit).
     if entry != 0 {
         return Decided::Ink {
             ink: inks[usize::from(entry & !MEMO_EXACT) - 1].0.ink,
@@ -182,6 +212,7 @@ fn memoized(
     }
 }
 
+// Returns a tuple: the ink color and whether it was an exact match.
 /// The ink for one composited pixel color, and whether it was an exact source match.
 fn lookup(inks: &[(Mapping, Lab)], color: Rgb8) -> (Rgb8, bool) {
     match lookup_index(inks, color) {
@@ -194,6 +225,7 @@ fn lookup(inks: &[(Mapping, Lab)], color: Rgb8) -> (Rgb8, bool) {
 /// Which mapping a composited color takes: an exact source match first (first match wins), else
 /// the nearest ink (ties: the earlier mapping). `None` only when there are no mappings.
 fn lookup_index(inks: &[(Mapping, Lab)], color: Rgb8) -> (Option<usize>, bool) {
+    // `position` gives the index of the first mapping whose source is exactly this color, if any.
     if let Some(index) = inks.iter().position(|(m, _)| m.source == color) {
         return (Some(index), true);
     }

@@ -1,13 +1,17 @@
-// Dev server only: rebuilds the WASM package when the Rust it is made from changes, then reloads the
-// page, so the worker loads the new module. Off under Vitest (which reuses the Vite config) and with
-// REKOLOR_WASM_WATCH=0.
+// Dev server only: rebuilds the WASM package when the Rust it is made from changes, then reloads
+// the page, so the worker loads the new module. Off under Vitest (which reuses the Vite config) and
+// with REKOLOR_WASM_WATCH=0.
 
+// A Vite plugin: an object with hooks that Vite calls at certain points (`config` when it reads
+// the settings, `configureServer` when the dev server starts). This file runs in Node.js, not in
+// the browser. `node:` imports are Node.js's built-in modules.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Plugin, ViteDevServer } from 'vite';
 
+// Paths, relative to this file's folder (`import.meta.url` is this file's own URL).
 const rust = fileURLToPath(new URL('../rust', import.meta.url));
 const wasmCrate = path.join(rust, 'crates/wasm');
 const pkg = path.join(wasmCrate, 'pkg');
@@ -30,6 +34,8 @@ const lockFile = path.join(rust, 'target', '.rekolor-wasm-watch.lock');
 const LOCK_RETRY_MS = 250;
 const STALE_LOCK_MS = 120_000;
 
+// Creates the lock file; the `wx` flag fails if it already exists, which makes taking the lock a
+// single atomic step. Returns whether the lock was taken.
 function tryLock(): boolean {
   try {
     fs.mkdirSync(path.dirname(lockFile), { recursive: true });
@@ -48,14 +54,17 @@ function tryLock(): boolean {
 
 const unlock = () => fs.rmSync(lockFile, { force: true });
 
+// Whether a changed file affects the WASM package: a manifest, or a `.rs` file in a source folder.
 const isRustInput = (file: string) =>
   manifests.includes(file) ||
   (file.endsWith('.rs') && sourceDirs.some((dir) => file.startsWith(dir + path.sep)));
 
+// Returning `false` instead of a plugin disables it; Vite skips falsy entries in `plugins`.
 export function wasmWatch(): Plugin | false {
   if (process.env.VITEST || process.env.REKOLOR_WASM_WATCH === '0') return false;
   return {
     name: 'rekolor-wasm-watch',
+    // Only for the dev server, never for `vite build`.
     apply: 'serve',
     config: () => ({
       // wasm-pack replaces the package file by file; reloading on the first one would load a
@@ -64,6 +73,9 @@ export function wasmWatch(): Plugin | false {
     }),
     configureServer(server) {
       const log = server.config.logger;
+      // Build state: the debounce timer, whether a build is running, and whether another change
+      // arrived during it. `ReturnType<typeof setTimeout>` is whatever `setTimeout` returns (its
+      // type differs between Node.js and browsers).
       let timer: ReturnType<typeof setTimeout> | undefined;
       let running = false;
       let again = false;
@@ -82,6 +94,8 @@ export function wasmWatch(): Plugin | false {
         running = true;
         const started = performance.now();
         log.info('[rekolor] Rust changed: rebuilding the WASM package…', { timestamp: true });
+        // Run `wasm-pack` as a separate process and collect everything it prints, for the error
+        // report.
         const child = spawn('wasm-pack', ['build', wasmCrate, '--release', '--target', 'web'], {
           stdio: ['ignore', 'pipe', 'pipe'],
         });
@@ -90,6 +104,8 @@ export function wasmWatch(): Plugin | false {
         child.stdout.on('data', collect);
         child.stderr.on('data', collect);
         let finished = false;
+        // Called once per build: on exit, or if `wasm-pack` couldn't be started (both events may
+        // fire, hence `finished`).
         const finish = (ok: boolean, why: string) => {
           if (finished) return;
           finished = true;
@@ -104,9 +120,11 @@ export function wasmWatch(): Plugin | false {
             log.info(`[rekolor] WASM package rebuilt in ${seconds} s; reloading the page`, {
               timestamp: true,
             });
+            // Tell the open pages to reload, over the dev server's WebSocket connection.
             server.ws.send({ type: 'full-reload' });
           } else {
             log.error(`[rekolor] WASM build failed (${why}):\n${output}`, { timestamp: true });
+            // Show Vite's error overlay in the open pages.
             server.ws.send({
               type: 'error',
               err: {
@@ -125,6 +143,8 @@ export function wasmWatch(): Plugin | false {
         child.on('close', (code) => finish(code === 0, `wasm-pack exited with ${code}`));
       };
 
+      // Vite's file watcher only watches the web app's own files by default; add the Rust inputs.
+      // Each change restarts the timer, so a burst of saves makes one build.
       server.watcher.add([...sourceDirs, ...manifests]);
       server.watcher.on('all', (_event, file) => {
         if (!isRustInput(file)) return;

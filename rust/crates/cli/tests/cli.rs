@@ -1,5 +1,8 @@
 //! End-to-end: runs the `rekolor` binary on a temporary samples tree.
 
+// An integration test that runs the real `rekolor` program as a separate process, exactly as a
+// user would, in a temporary folder. Test images come from the shared generator (see
+// `rekolor-core`'s `tests/fingerprint.rs`).
 #[path = "../../../testdata/generator.rs"]
 mod generator;
 
@@ -16,6 +19,8 @@ fn repo_palette() -> PathBuf {
     ))
 }
 
+// Runs `rekolor <args>` in `cwd` and captures its output. Cargo builds the binary before the
+// tests and passes its path in `CARGO_BIN_EXE_rekolor`.
 fn rekolor(args: &[&str], cwd: &Path) -> Output {
     Command::new(env!("CARGO_BIN_EXE_rekolor"))
         .args(args)
@@ -24,6 +29,8 @@ fn rekolor(args: &[&str], cwd: &Path) -> Output {
         .expect("run rekolor")
 }
 
+// The program's standard output, after checking that it succeeded (showing its error output if
+// not).
 fn ok(output: Output) -> String {
     assert!(
         output.status.success(),
@@ -33,6 +40,7 @@ fn ok(output: Output) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
+// The returned `TempDir` deletes the folder when it is dropped (at the end of the test).
 /// A samples tree with two generated images: `edges.png` and `sub/gradient.png`.
 fn samples_tree() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();

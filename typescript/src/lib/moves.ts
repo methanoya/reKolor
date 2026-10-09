@@ -1,6 +1,6 @@
-// Moving a pick by Shift-dragging its marker: the order and coalescing of
-// the live updates, the cancel, and the marker drawn while a drag is in progress. The pick-list
-// work itself is injected, so the rules are testable in Node with controlled promises.
+// Moving a pick by Shift-dragging its marker: the order and coalescing of the live updates, the
+// cancel, and the marker drawn while a drag is in progress. The pick-list work itself is injected,
+// so the rules are testable in Node with controlled promises.
 
 import type { PickMove } from './picks';
 
@@ -12,6 +12,8 @@ export interface Marker {
   y: number;
 }
 
+// The functions the app passes in (dependency injection). `Saved` is a type parameter: whatever
+// the app stores to undo a drag; this file never looks inside it.
 export interface MoveHooks<Saved> {
   /** Runs a task after every earlier pick-list change (the app's `Serial` queue). */
   queue: (task: () => Promise<void>) => Promise<unknown>;
@@ -28,6 +30,8 @@ export interface MoveHooks<Saved> {
   show: (marker: Marker | undefined) => void;
 }
 
+// One queued update. `epoch` records which `reset()` period it belongs to; `dropped` marks it
+// cancelled before it ran.
 interface Slot {
   move: PickMove;
   epoch: number;
@@ -51,6 +55,9 @@ export class Mover<Saved> {
   update(move: PickMove): void {
     this.#show({ drag: move.drag, id: move.id, x: move.x, y: move.y });
     const pending = this.#pending;
+    // The same drag already has an update waiting in the queue: just give it the newer position, so
+    // a fast drag costs one update per queue turn rather than one per pixel. `{ ...move }` stores a
+    // copy, so later changes to the caller's object can't leak in.
     if (pending?.move.drag === move.drag && !pending.move.done) {
       pending.move = { ...move };
       return;
@@ -61,9 +68,11 @@ export class Mover<Saved> {
       if (this.#pending === slot) this.#pending = undefined;
       if (slot.dropped || slot.epoch !== this.#epoch) return;
       const { move } = slot;
+      // The first update of a drag that actually runs saves the pick, so a cancel can restore it.
       if (this.#saved?.drag !== move.drag) {
         this.#saved = { drag: move.drag, value: this.#hooks.save(move.id) };
       }
+      // `finally` runs whether `apply` succeeds or throws.
       try {
         await this.#hooks.apply(move);
       } finally {
