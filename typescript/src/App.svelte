@@ -24,7 +24,7 @@
   import { Latest } from './lib/latest';
   import { Mover, type Marker } from './lib/moves';
   import { LIMITS } from './lib/limits';
-  import { reportError, track } from './lib/logrocket';
+  import { imageFormat, reportError, track } from './lib/logrocket';
   import type { AppErrorKind, AppOutcome } from './lib/outcome';
   import {
     BLACK,
@@ -201,29 +201,34 @@
     view = fit(image, viewport);
     status = 'Click a color in the original to pick it.';
     requestRecolor();
-    await countColors();
-    // Recorded once the colors are counted (the count is part of the event), unless another image
-    // was opened meanwhile. The format is the file's type, or its extension when the browser
-    // doesn't know the type (EXR, QOI, …).
+    const counted = await countColors();
+    // Recorded once the colors are counted, with this open's own count (a material change while it
+    // counted starts another count, but this one is still this image's), unless another image was
+    // opened meanwhile. `colors` is left out only if counting failed. The format is a name from a
+    // fixed list (`imageFormat`), never part of the file's name.
     if (gen === generation) {
-      const extension = /\.([^.]+)$/.exec(f.name)?.[1]?.toLowerCase();
       track('Image opened', {
-        format: f.type || extension || 'unknown',
+        format: imageFormat(f),
         width: opened.value.width,
         height: opened.value.height,
-        ...(colors === undefined ? {} : { colors }),
+        ...(counted === undefined ? {} : { colors: counted }),
       });
     }
   }
 
-  /** Counts the current image's colors on the current material (shown in the toolbar). */
-  async function countColors() {
+  /**
+   * Counts the current image's colors on the current material (shown in the toolbar), and returns
+   * the count (`undefined` if counting failed), even when the toolbar no longer shows it.
+   */
+  async function countColors(): Promise<number | undefined> {
     const gen = generation;
     const on = material;
     colors = undefined;
     const counted = await client.call((api) => api.colorCount(gen, on));
-    // Only for the image and material it was made for.
-    if (gen === generation && on === material && counted.status === 'ok') colors = counted.value;
+    if (counted.status !== 'ok') return undefined;
+    // Shown only for the image and material it was made for.
+    if (gen === generation && on === material) colors = counted.value;
+    return counted.value;
   }
 
   // ── Picks ────────────────────────────────────────────────────────────────────────────────────

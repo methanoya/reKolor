@@ -137,18 +137,22 @@ The published site records visits with [LogRocket](https://logrocket.com). `src/
   aren't anonymous: the browser's details are recorded.
 - **Events** (`track`), searchable in LogRocket as custom events:
 
-| Event          | When                                    | Properties                            |
-| -------------- | --------------------------------------- | ------------------------------------- |
-| Image opened   | an image is open and its colors counted | `format`, `width`, `height`, `colors` |
-| Pick added     | a click on the original adds a pick     | `picks` (the count after)             |
-| Pick removed   | a pick's × button                       | `picks` (the count after)             |
-| Picks cleared  | "Clear all"                             | `removed`                             |
-| Picks imported | a palette config is imported            | `size`, `picks`, `unprinted`          |
-| Picks exported | "Export picks"                          | `picks`, `unprinted`                  |
-| PNG downloaded | "Download PNG"                          | `picks`, `inks` (distinct inks)       |
+| Event          | When                                    | Properties                                 |
+| -------------- | --------------------------------------- | ------------------------------------------ |
+| Image opened   | an image is open and its colors counted | `format` (\*), `width`, `height`, `colors` |
+| Pick added     | a click on the original adds a pick     | `picks` (the count after)                  |
+| Pick removed   | a pick's × button                       | `picks` (the count after)                  |
+| Picks cleared  | "Clear all"                             | `removed`                                  |
+| Picks imported | a palette config is imported            | `size`, `picks`, `unprinted`               |
+| Picks exported | "Export picks"                          | `picks`, `unprinted`                       |
+| PNG downloaded | "Download PNG"                          | `picks`, `inks` (distinct inks)            |
 
-Tests: `src/lib/logrocket.test.ts` (with LogRocket replaced by a fake) and, in
-`tests/browser/app.test.ts`, the private parts and the privacy link.
+(\*) A name from a fixed list (`imageFormat` in `src/lib/logrocket.ts`), found from the file's type or,
+without one, its extension; anything else is `other`, so no part of a file name is sent.
+
+Tests: `src/lib/logrocket.test.ts` (with LogRocket replaced by a fake); in the browser,
+`tests/browser/app.test.ts` (the private parts and the privacy link) and
+`tests/browser/events.test.ts` (what "Image opened" carries).
 
 ## Browser differences found by the cross-decoder test
 

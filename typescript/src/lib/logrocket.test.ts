@@ -59,6 +59,20 @@ describe('LogRocket', () => {
     );
   });
 
+  test('an image format comes from a fixed list, never from the file name', async () => {
+    const { imageFormat } = await load('localhost');
+    expect(imageFormat({ name: 'photo.png', type: 'image/png' })).toBe('png');
+    expect(imageFormat({ name: 'icon.ico', type: 'image/vnd.microsoft.icon' })).toBe('ico');
+    // Without a type (the browser doesn't know EXR, say), the extension, if it is in the list.
+    expect(imageFormat({ name: 'Photo.JPG', type: '' })).toBe('jpeg');
+    expect(imageFormat({ name: 'render.exr', type: '' })).toBe('exr');
+    // Anything else is `other`: no part of a name gets through.
+    expect(imageFormat({ name: 'scan.patient-id', type: '' })).toBe('other');
+    expect(imageFormat({ name: 'Client Secret', type: '' })).toBe('other');
+    expect(imageFormat({ name: 'x.constructor', type: '' })).toBe('other');
+    expect(imageFormat({ name: 'x.png', type: 'image/x-client-secret' })).toBe('other');
+  });
+
   test('calls made while LogRocket loads are sent, in order, once it has started', async () => {
     const lr = await load('methanoya.github.io');
     lr.startRecording();

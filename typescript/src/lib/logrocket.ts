@@ -74,6 +74,58 @@ function send(call: Call): void {
 /** Values an event may carry: LogRocket accepts strings, numbers and booleans. */
 export type EventProperties = Record<string, string | number | boolean>;
 
+// The image formats an event may name, keyed by MIME subtype (`image/png` → `png`) or file
+// extension, each mapped to one name. A lookup in this fixed table is the only way a format gets
+// into an event: an unknown type or extension becomes `other`, so no part of a file's name (such as
+// `patient-id` in `scan.patient-id`) can reach LogRocket.
+const FORMATS: Readonly<Record<string, string>> = {
+  png: 'png',
+  apng: 'png',
+  jpeg: 'jpeg',
+  jpg: 'jpeg',
+  jpe: 'jpeg',
+  jfif: 'jpeg',
+  pjpeg: 'jpeg',
+  gif: 'gif',
+  webp: 'webp',
+  avif: 'avif',
+  bmp: 'bmp',
+  'x-ms-bmp': 'bmp',
+  ico: 'ico',
+  'x-icon': 'ico',
+  'vnd.microsoft.icon': 'ico',
+  tif: 'tiff',
+  tiff: 'tiff',
+  svg: 'svg',
+  'svg+xml': 'svg',
+  heic: 'heic',
+  heif: 'heif',
+  jxl: 'jxl',
+  exr: 'exr',
+  hdr: 'hdr',
+  qoi: 'qoi',
+  tga: 'tga',
+  dds: 'dds',
+  pbm: 'pnm',
+  pgm: 'pnm',
+  ppm: 'pnm',
+  pnm: 'pnm',
+  pam: 'pnm',
+  ff: 'farbfeld',
+};
+
+/**
+ * The image format to report for a file: from its type (`image/…`), or, when the browser gives
+ * none, its extension; always one of the names in `FORMATS`, or `other`.
+ */
+export function imageFormat(file: { name: string; type: string }): string {
+  const subtype = /^image\/(.+)$/.exec(file.type)?.[1];
+  const extension = /\.([^.]+)$/.exec(file.name)?.[1];
+  // `Object.hasOwn` keeps names like `constructor` (inherited by every object) from matching.
+  const key = (subtype ?? extension ?? '').toLowerCase();
+  return Object.hasOwn(FORMATS, key) ? FORMATS[key]! : 'other';
+}
+
 /** Records a named user action (searchable in LogRocket as a custom event). */
 export function track(event: string, properties?: EventProperties): void {
   send((lr) => lr.track(event, properties));
