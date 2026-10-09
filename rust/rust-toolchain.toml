@@ -1,8 +1,9 @@
 # Which Rust compiler this workspace uses. `rustup` (the Rust toolchain installer) reads this file
 # and installs what is listed the first time a `cargo` command runs in this folder.
 [toolchain]
-# The latest stable release, whatever it is at the time ("floating" stable).
-channel = "stable"
+# An exact stable release, so a new Rust release (with new clippy lints) can't fail a build that
+# passed before. Move to a newer release on purpose, in its own change, and fix what it reports.
+channel = "1.99.0"
 # Extra compilation targets besides the host: WebAssembly for browsers, used by `wasm-pack`.
 targets = ["wasm32-unknown-unknown"]
 # Extra tools: `clippy` (the linter, `cargo clippy`) and `rustfmt` (the formatter, `cargo fmt`).

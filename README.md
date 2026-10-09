@@ -8,7 +8,7 @@ preview updates as you pick.
 
 Try it at [methanoya.github.io/reKolor](https://methanoya.github.io/reKolor/).
 
-![The web app: a tiger picked with five inks on a black material](screenshot.png)
+![The web app: an illustration printed with eight inks on a sky-blue material](screenshot.png)
 
 - **Picks:** every pixel takes the ink of the nearest picked color. Each pick suggests the nearest
   Pantone ink; the list offers the next closest ones. Shift-drag a pick's circle to move it.

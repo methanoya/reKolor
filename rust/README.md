@@ -17,8 +17,8 @@ Shared test data lives in `testdata/` (see [Baseline snapshot](#baseline-snapsho
 
 ## Requirements
 
-- **rustup.** `rust-toolchain.toml` selects stable Rust with the `wasm32-unknown-unknown` target,
-  clippy and rustfmt; rustup installs them on first use. Run cargo from inside `rust/`, where
+- **rustup.** `rust-toolchain.toml` selects Rust 1.99.0 (an exact stable release) with the
+  `wasm32-unknown-unknown` target, clippy and rustfmt; rustup installs them on first use. Run cargo from inside `rust/`, where
   rustup finds that file. (Homebrew's `rust` package can't add the WASM target.)
 - **wasm-pack** 0.15 (`brew install wasm-pack` or `cargo install wasm-pack --locked`).
 - **Node 24**, for the WASM tests and the TypeScript contract test.

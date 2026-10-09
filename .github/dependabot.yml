@@ -1,0 +1,15 @@
+# Dependabot: proposes updates to the GitHub Actions in `.github/workflows/`, which are pinned to
+# release commits. It updates the commit and the release named in the comment beside it.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # Leave a release alone for its first week: early problems are usually found and fixed by then.
+    cooldown:
+      default-days: 7
+    # All action updates in one pull request a week.
+    groups:
+      actions:
+        patterns: ['*']

@@ -1,0 +1,315 @@
+# Continuous integration: checks, builds and tests everything the local checks cover
+# (`rust/README.md`, "Checks"; `typescript/README.md`, "Scripts") on every pull request and every
+# push to `main`. A version tag (`v1.2.3`), or a manual run on `main`, also publishes the web app to
+# GitHub Pages through the `releases` branch.
+#
+# How the jobs depend on each other:
+#   rust (Linux, macOS) ─────────────────────────────────┐
+#   wasm ─┬─ contract ───────────────────────────────────┤─▶ publish (version tag or manual run)
+#         ├─ web: check, lint, unit tests, smoke, site ───┤
+#         └─ browser: Chromium, Firefox, WebKit ──────────┘
+# `wasm` builds the WebAssembly package once; the three jobs after it download that same package.
+#
+# Each action is pinned to the commit of a release (the comment names the release), so a moved or
+# compromised tag can't change what runs. Dependabot (`.github/dependabot.yml`) proposes updates.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    # A version tag, such as `v2.0.0`, publishes the site.
+    tags: ['v*']
+  # A manual run from the Actions tab; on `main` or a version tag it also publishes.
+  workflow_dispatch:
+
+# The token every job gets: read-only, unless a job asks for more (only `publish` does).
+permissions:
+  contents: read
+
+# One run per branch, tag or pull request at a time: a new push to a pull request cancels the run in
+# progress. Other runs are never cancelled, so no publish is cut short.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  # `npm ci` runs the `prepare` script, which installs the Git hooks; CI doesn't need them.
+  HUSKY: '0'
+
+jobs:
+  # ── Rust: formatting, lints and every native test, including the golden set ──────────────────
+  rust:
+    name: Rust (${{ matrix.os }})
+    strategy:
+      # Finish both systems even if one fails, to see whether a failure is system-specific.
+      fail-fast: false
+      matrix:
+        # macOS (arm64) is where the golden outputs are made; Linux (x86_64) decodes JPEG with
+        # different CPU instructions, so both run until it's known whether they agree.
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Reads `rust-toolchain.toml`: the toolchain, the wasm32 target, clippy and rustfmt.
+      - name: Install the Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: rust
+      - name: Formatting
+        run: cargo fmt --all --check
+      - name: Clippy (native)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Clippy (wasm32)
+        run: >-
+          cargo clippy -p rekolor-wasm --target wasm32-unknown-unknown --all-targets
+          -- -D warnings
+      # The color math must come from `libm` (identical on every target), never from `std`.
+      - name: palette uses libm, not std
+        run: |
+          for target in "" "--target wasm32-unknown-unknown"; do
+            tree=$(cargo tree -e features -i palette_math $target)
+            if ! grep -q 'palette feature "libm"' <<<"$tree"; then
+              echo "::error::palette is built without libm ($target)"; exit 1
+            fi
+            if grep -q 'palette feature "std"' <<<"$tree"; then
+              echo "::error::palette is built with std ($target)"; exit 1
+            fi
+          done
+      - name: Tests (debug)
+        run: cargo test --workspace
+      # The shipped code is a release build, so the ΔE fingerprint runs in release too.
+      - name: Tests (release)
+        run: cargo test --workspace --release
+      # On a mismatch, the test writes diff images to `$TMPDIR/rekolor-golden-diff/`.
+      - name: Golden set
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: cargo test --release -p rekolor-cli --test golden -- --ignored
+      - name: Upload the golden diff images
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: golden-diff-${{ matrix.os }}
+          path: ${{ runner.temp }}/rekolor-golden-diff
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ── WebAssembly: the tests inside WASM, then the package the web jobs use ──────────────────────
+  wasm:
+    name: WASM tests and package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: rust
+          key: wasm
+      # `wasm-pack test --node` runs the tests in Node.js.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          tool: wasm-pack@0.15.0
+      - name: Tests inside WASM (debug)
+        run: wasm-pack test --node crates/wasm
+      - name: Tests inside WASM (release)
+        run: wasm-pack test --node --release crates/wasm
+      - name: Build the package
+        run: wasm-pack build crates/wasm --release --target web
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wasm-pkg
+          path: rust/crates/wasm/pkg
+          if-no-files-found: error
+          retention-days: 7
+
+  # ── The package's TypeScript contract, as an app sees it ───────────────────────────────────────
+  contract:
+    name: TypeScript contract test
+    needs: wasm
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust/crates/wasm/ts-test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The package must exist before `npm ci`: `package.json` depends on `file:../pkg`.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: wasm-pkg
+          path: rust/crates/wasm/pkg
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: rust/crates/wasm/ts-test/package-lock.json
+      - run: npm ci
+      # `tsc --noEmit` against the generated `.d.ts`, then Vitest.
+      - run: npm test
+
+  # ── The web app: types, lint, unit tests, and the production build behind the smoke test ───────
+  web:
+    name: Web app
+    needs: wasm
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typescript
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: wasm-pkg
+          path: rust/crates/wasm/pkg
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm run lint
+      - run: npm test
+      - name: Install Chromium for the smoke test
+        run: npx playwright install --with-deps chromium
+      # Builds `dist/` for GitHub Pages (base `/reKolor/`), serves it and drives it in Chromium.
+      - name: Smoke test
+        run: npm run smoke
+      # The files the smoke test just checked are the ones that get published; any run's build can
+      # also be downloaded from its summary page.
+      - name: Keep the site
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: site
+          path: typescript/dist
+          if-no-files-found: error
+          retention-days: 7
+
+  # ── The app end to end in three browser engines ────────────────────────────────────────────────
+  browser:
+    name: Browser tests
+    needs: wasm
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typescript
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: wasm-pkg
+          path: rust/crates/wasm/pkg
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+      - run: npm ci
+      - name: Cache the Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('typescript/package-lock.json') }}
+      # Downloads the browsers unless cached, and always installs their system libraries.
+      - name: Install Chromium, Firefox and WebKit
+        run: npx playwright install --with-deps chromium firefox webkit
+      - run: npm run test:browser
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-test-failures
+          path: typescript/.vitest
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ── Publish the web app (version tags and manual runs on main, after everything above passed) ──
+  # GitHub Pages serves the `releases` branch (Settings → Pages: "Deploy from a branch"). This job
+  # replaces the branch's files with the tested build and commits them. GitHub doesn't start a Pages
+  # build for a push made with the workflow's own token, so the job then requests one and waits for
+  # it. If GitHub ever refuses that request, push with a deploy key instead: an SSH key with write
+  # access to this repository, given to `actions/checkout` as `ssh-key`; its push starts the build.
+  publish:
+    name: Publish to GitHub Pages
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    needs: [rust, contract, web, browser]
+    runs-on: ubuntu-latest
+    # Only this job may write: `contents` to push `releases`, `pages` to request the build.
+    permissions:
+      contents: write
+      pages: write
+    # One publish at a time, never cancelled midway.
+    concurrency:
+      group: publish
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out the releases branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: releases
+          path: releases
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: site
+          path: site
+      # Replaces every file, so nothing from an older version stays behind. Without a change (the
+      # same build published again), there is nothing to commit.
+      - name: Commit the site to the releases branch
+        id: commit
+        working-directory: releases
+        run: |
+          git rm -rq --ignore-unmatch .
+          cp -R ../site/. .
+          # Publish the files as they are, without GitHub's Jekyll processing.
+          touch .nojekyll
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'The site is unchanged: nothing to commit.'
+          else
+            git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -q -m "Publish $GITHUB_REF_NAME (${GITHUB_SHA::7})"
+            git push -q origin HEAD:releases
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      # Waits for GitHub to report the build of that commit: done, failed, or still missing after
+      # 10 minutes (a build usually takes under a minute).
+      - name: Build GitHub Pages and wait for it
+        env:
+          COMMIT: ${{ steps.commit.outputs.sha }}
+        run: |
+          if ! gh api --method POST "repos/$GITHUB_REPOSITORY/pages/builds" > /dev/null; then
+            echo "::error::GitHub refused the Pages build request. The releases branch has the new site ($COMMIT), but the live site is unchanged; see the comment on this job."
+            exit 1
+          fi
+          for _ in $(seq 60); do
+            sleep 10
+            case "$(gh api "repos/$GITHUB_REPOSITORY/pages/builds/latest" --jq '"\(.commit) \(.status)"')" in
+              "$COMMIT built")
+                echo "Published $COMMIT: $(gh api "repos/$GITHUB_REPOSITORY/pages" --jq .html_url)"
+                exit 0 ;;
+              "$COMMIT errored")
+                echo "::error::The Pages build of $COMMIT failed; see Settings → Pages."
+                exit 1 ;;
+            esac
+          done
+          echo "::error::No finished Pages build of $COMMIT after 10 minutes."
+          exit 1
