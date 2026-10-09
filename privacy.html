@@ -1,0 +1,134 @@
+<!doctype html>
+<!-- The privacy notice for the published site, linked from the app's header ("Privacy"). It must
+     match what `src/lib/logrocket.ts` sets up; change both together. Files in `public/` are copied
+     into the build as they are. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <title>reKolor · Privacy</title>
+    <style>
+      /* The app's colors and font (`src/app.css`), light and dark; links use its focus blue. */
+      :root {
+        --bg: #f7f7f5;
+        --fg: #1d1d1b;
+        --muted: #5d5d58;
+        --link: #0057b8;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #161615;
+          --fg: #ececea;
+          --muted: #a8a8a2;
+          --link: #6aa7ff;
+        }
+      }
+      body {
+        margin: 0 auto;
+        max-width: 42rem;
+        padding: 1.5rem 1rem 3rem;
+        background: var(--bg);
+        color: var(--fg);
+        font-family:
+          system-ui,
+          -apple-system,
+          'Segoe UI',
+          sans-serif;
+        line-height: 1.45;
+      }
+      h1 {
+        font-size: 1.6rem;
+        margin: 0 0 0.25rem;
+      }
+      h2 {
+        font-size: 1.1rem;
+        margin: 1.75rem 0 0.25rem;
+      }
+      .updated {
+        margin: 0;
+        color: var(--muted);
+      }
+      a {
+        color: var(--link);
+      }
+      li + li {
+        margin-top: 0.25rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Privacy</h1>
+    <p class="updated">reKolor · last updated 9 October 2026</p>
+
+    <h2>Your images stay on your device</h2>
+    <p>
+      reKolor works in your browser. The images and palette files you open are processed on your
+      device; the app doesn't upload them anywhere.
+    </p>
+
+    <h2>This site records visits</h2>
+    <p>
+      To find bugs and see how the app is used, this site (<a
+        href="https://methanoya.github.io/reKolor/"
+        >methanoya.github.io/reKolor</a
+      >) records each visit with <a href="https://logrocket.com">LogRocket</a>, a session-replay
+      service run by LogRocket, Inc., in the United States. Recording starts when the page opens.
+    </p>
+
+    <h2>What is recorded</h2>
+    <ul>
+      <li>
+        The page as you see it, and what you do on it: clicks, scrolling, and the settings you
+        change (such as the material color and the inks), except the parts listed below.
+      </li>
+      <li>Messages in the browser's console, errors, and performance data such as load times.</li>
+      <li>
+        Your browser's details: its type and version, operating system, screen size, language, and
+        the page you came from.
+      </li>
+      <li>
+        A few named events, with numbers only: an image opened (its format, size in pixels and
+        number of colors), picks added, removed or cleared, palettes imported or exported, and a PNG
+        downloaded (how many picks and inks). And the kind of any error the app shows, such as "the
+        browser couldn't decode the file", without its message.
+      </li>
+    </ul>
+
+    <h2>What is not recorded</h2>
+    <ul>
+      <li>Your images, and the previews made from them.</li>
+      <li>The names of your files: the parts of the page that show them are left out.</li>
+      <li>Your IP address: this site tells LogRocket not to store it.</li>
+      <li>Network requests.</li>
+    </ul>
+    <p>
+      The parts of the page that are left out never reach LogRocket. Recordings aren't linked to a
+      name or an account (the site has none), and they aren't used for advertising.
+    </p>
+
+    <h2>How long, and who sees them</h2>
+    <p>
+      Recordings are kept for the retention period of this site's LogRocket plan, then deleted. Only
+      the site's maintainer can view them, in LogRocket, which handles them on the site's behalf
+      (see <a href="https://logrocket.com/privacy">LogRocket's privacy policy</a>).
+    </p>
+
+    <h2>Not being recorded</h2>
+    <p>
+      A content or tracker blocker that blocks LogRocket stops the recording; the app works the same
+      without it. A copy of reKolor you run yourself, from its source code, records nothing.
+    </p>
+
+    <h2>Questions and deletion</h2>
+    <p>
+      Open an issue at
+      <a href="https://github.com/methanoya/reKolor/issues">github.com/methanoya/reKolor/issues</a>.
+      Issues are public, so don't include personal details. To have a recording deleted, give the
+      date and approximate time of your visit, and your browser.
+    </p>
+
+    <p><a href="./">Back to reKolor</a></p>
+  </body>
+</html>
