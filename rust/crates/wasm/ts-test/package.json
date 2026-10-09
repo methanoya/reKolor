@@ -9,9 +9,9 @@
     "test": "npm run typecheck && vitest run"
   },
   "devDependencies": {
-    "@types/node": "^24.19.1",
+    "@types/node": "^26.6.4",
     "rekolor-wasm": "file:../pkg",
-    "typescript": "~6.0.3",
+    "typescript": "~7.0.2",
     "vite": "^8.3.3",
     "vitest": "^5.0.3"
   },
