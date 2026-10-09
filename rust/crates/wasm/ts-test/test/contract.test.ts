@@ -270,7 +270,7 @@ describe('SourceImage', () => {
 describe('palette configs', () => {
   test('a golden-set config parses, resolves against the palette and round-trips', async () => {
     const text = await readFile(
-      new URL('../../../../../samples/good-looking/04-tiger.palettes.toml', import.meta.url),
+      new URL('../../../../../samples/selected/04-tiger.palettes.toml', import.meta.url),
       'utf8',
     );
     const parsed = unwrap(parseConfig(text));

@@ -81,14 +81,14 @@ mod tests {
 
     #[test]
     fn paths_sit_next_to_the_image() {
-        let image = Path::new("samples/good-looking/04-tiger.png");
+        let image = Path::new("samples/selected/04-tiger.png");
         assert_eq!(
             config_path(image),
-            Path::new("samples/good-looking/04-tiger.palettes.toml")
+            Path::new("samples/selected/04-tiger.palettes.toml")
         );
         assert_eq!(
             output_path(image, 16),
-            Path::new("samples/good-looking/04-tiger-out-16.png")
+            Path::new("samples/selected/04-tiger-out-16.png")
         );
     }
 }

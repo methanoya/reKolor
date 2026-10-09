@@ -10,7 +10,7 @@
 import { build, preview } from 'vite';
 import { chromium } from 'playwright';
 
-const sample = new URL('../../samples/good-looking/04-tiger.png', import.meta.url).pathname;
+const sample = new URL('../../samples/selected/04-tiger.png', import.meta.url).pathname;
 
 // Build exactly as for GitHub Pages, then serve the result locally with `vite preview`.
 await build({ mode: 'pages', logLevel: 'warn' });

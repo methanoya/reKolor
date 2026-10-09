@@ -561,7 +561,7 @@ fn pantone_palette() -> Palette {
 }
 
 const SAMPLE_CONFIGS: &[&str] = &[
-    include_str!("../../../../samples/good-looking/04-tiger.palettes.toml"),
+    include_str!("../../../../samples/selected/04-tiger.palettes.toml"),
     include_str!("../../../../samples/arbitrary/07-alpha-hue.palettes.toml"),
     include_str!("../../../../samples/others/icon-calendar.palettes.toml"),
 ];
