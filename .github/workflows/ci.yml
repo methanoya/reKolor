@@ -99,6 +99,10 @@ jobs:
   rust:
     # The name shown in the Actions tab and on pull requests; `matrix.os` is filled in per copy.
     name: Rust (${{ matrix.os }})
+    # A time limit: GitHub stops the job if it runs longer than this, so a stuck step (a
+    # download that hangs, say) doesn't hold the runner, and the jobs waiting for it, for hours.
+    # Normally this job takes about 6 minutes at most, on macOS without a cache.
+    timeout-minutes: 30
     strategy:
       # Finish both systems even if one fails, to see whether a failure is system-specific.
       fail-fast: false
@@ -193,6 +197,8 @@ jobs:
   # compiled to WebAssembly, then builds the package the web app loads, and uploads it.
   wasm:
     name: WASM tests and package
+    # Time limit (see `rust`); normally about 2 minutes.
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -239,6 +245,8 @@ jobs:
   # app does: it checks that the package's types and functions are what the app expects.
   contract:
     name: TypeScript contract test
+    # Time limit (see `rust`); normally under half a minute.
+    timeout-minutes: 10
     # Waits for `wasm`, whose package it tests.
     needs: wasm
     runs-on: ubuntu-latest
@@ -269,11 +277,18 @@ jobs:
   # ── The web app: types, lint, unit tests, and the production build behind the smoke test ───────
   web:
     name: Web app
+    # Time limit (see `rust`); normally about a minute.
+    timeout-minutes: 15
     needs: wasm
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: typescript
+    # The commit being built (`github.sha`), built into the site as its release name: LogRocket's
+    # recordings of the published site say which code was running (`src/lib/logrocket.ts`). Vite
+    # passes environment variables starting with `VITE_` to the app.
+    env:
+      VITE_RELEASE: ${{ github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # The web app imports the package from `rust/crates/wasm/pkg`.
@@ -317,6 +332,8 @@ jobs:
   # Two copies of this job: Chromium and Firefox on Linux, WebKit (Safari's engine) on macOS.
   browser:
     name: Browser tests (${{ matrix.name }})
+    # Time limit (see `rust`); normally about a minute and a half.
+    timeout-minutes: 20
     needs: wasm
     strategy:
       # Finish both even if one fails, to see whether a failure is engine-specific.
@@ -392,16 +409,19 @@ jobs:
 
   # ── Publish the web app (version tags and manual runs on main, after everything above passed) ──
   # GitHub Pages serves the `releases` branch (Settings → Pages: "Deploy from a branch"). This job
-  # replaces the branch's files with the tested build and commits them. GitHub doesn't start a Pages
-  # build for a push made with the workflow's own token, so the job then requests one and waits for
-  # it. If GitHub ever refuses that request, push with a deploy key instead: an SSH key with write
-  # access to this repository, given to `actions/checkout` as `ssh-key`; its push starts the build.
+  # replaces the branch's files with the tested build and commits them, then makes sure GitHub
+  # builds the site from that commit (requesting a build only if the push didn't start one), and
+  # waits for it. If GitHub ever refuses that request, push with a deploy key instead: an SSH key
+  # with write access to this repository, given to `actions/checkout` as `ssh-key`; its push starts
+  # the build.
   #
   # To publish: push a tag such as `v2.0.0` (`git tag v2.0.0`, then `git push origin v2.0.0`), or
   # use "Run workflow" in the Actions tab on `main`. Running it on an older tag publishes that
   # older version again.
   publish:
     name: Publish to GitHub Pages
+    # Time limit (see `rust`); normally under a minute, plus at most 10.5 minutes waiting for Pages.
+    timeout-minutes: 15
     # Runs only if this is true; otherwise the job shows as skipped. `github.ref` is what the run is
     # for: `refs/tags/<tag>` or `refs/heads/<branch>`. So: a tag starting with `v`, or a manual
     # run (`workflow_dispatch`) on `main`. `||` means "or", `&&` means "and".
@@ -466,25 +486,42 @@ jobs:
           # Hands the branch's latest commit to the next step: GitHub reads `name=value` lines
           # added (`>>`) to the file named in `$GITHUB_OUTPUT` as this step's outputs.
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      # Asks GitHub to build the site from `releases`, then waits for GitHub to report the build of
-      # that commit: done, failed, or still missing after 10 minutes (a build usually takes under a
-      # minute).
+      # Makes sure GitHub builds the site from that commit, then waits for the build: done, failed,
+      # or still missing after 10 minutes (a build usually takes under a minute).
       - name: Build GitHub Pages and wait for it
         env:
           COMMIT: ${{ steps.commit.outputs.sha }}
         run: |
-          # `gh api` calls GitHub's web API. `--method POST .../pages/builds` requests a build;
-          # `> /dev/null` throws away what it prints. If the request fails, stop with an error.
-          if ! gh api --method POST "repos/$GITHUB_REPOSITORY/pages/builds" > /dev/null; then
-            echo "::error::GitHub refused the Pages build request. The releases branch has the new site ($COMMIT), but the live site is unchanged; see the comment on this job."
-            exit 1
+          # A small command used below: asks GitHub's web API (`gh api`) for the latest Pages build
+          # and prints its commit and status, such as "1da5c2b… built" (`--jq` picks the two fields
+          # out of the answer).
+          latest() { gh api "repos/$GITHUB_REPOSITORY/pages/builds/latest" --jq '"\(.commit) \(.status)"'; }
+
+          # GitHub may start a build for the push by itself: it did for the first publish, although
+          # its documentation says a push with the workflow's own token doesn't. Requesting another
+          # one then starts a second build, and the first shows as failed. So wait up to 30 seconds
+          # (6 checks, 5 seconds apart) for a build of this commit, and request one only if none
+          # started. A site that didn't change (no new commit) already has its build.
+          started=no
+          for _ in $(seq 6); do
+            # `case` compares the answer with the pattern; `*` matches any status.
+            case "$(latest)" in "$COMMIT "*) started=yes; break ;; esac
+            sleep 5
+          done
+          if [ "$started" = no ]; then
+            # `--method POST .../pages/builds` requests a build; `> /dev/null` throws away what it
+            # prints. If the request fails, stop with an error.
+            if ! gh api --method POST "repos/$GITHUB_REPOSITORY/pages/builds" > /dev/null; then
+              echo "::error::GitHub refused the Pages build request. The releases branch has the new site ($COMMIT), but the live site is unchanged; see the comment on this job."
+              exit 1
+            fi
           fi
-          # Up to 60 times (`seq 60` counts 1 to 60), every 10 seconds: ask for the latest build
-          # and compare its commit and status (`--jq` picks the two fields out of the answer).
-          # `case` compares the answer with each pattern; `exit 0` ends with success.
+
+          # Up to 60 times (`seq 60` counts 1 to 60), every 10 seconds: is the latest build this
+          # commit's, and has it finished? `exit 0` ends with success.
           for _ in $(seq 60); do
             sleep 10
-            case "$(gh api "repos/$GITHUB_REPOSITORY/pages/builds/latest" --jq '"\(.commit) \(.status)"')" in
+            case "$(latest)" in
               "$COMMIT built")
                 echo "Published $COMMIT: $(gh api "repos/$GITHUB_REPOSITORY/pages" --jq .html_url)"
                 exit 0 ;;

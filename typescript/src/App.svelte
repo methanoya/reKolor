@@ -16,6 +16,7 @@
   import type { ConfigSection, ConfigUnprinted, Rgb, Rgba } from 'rekolor-wasm';
   import { onDestroy } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
+  import BuiltWith from './components/BuiltWith.svelte';
   import ImageView from './components/ImageView.svelte';
   import PickList from './components/PickList.svelte';
   import { EngineClient } from './lib/client';
@@ -23,7 +24,8 @@
   import { Latest } from './lib/latest';
   import { Mover, type Marker } from './lib/moves';
   import { LIMITS } from './lib/limits';
-  import type { AppOutcome } from './lib/outcome';
+  import { imageFormat, reportError, track } from './lib/logrocket';
+  import type { AppErrorKind, AppOutcome } from './lib/outcome';
   import {
     BLACK,
     WHITE,
@@ -40,16 +42,29 @@
   import { Serial } from './lib/serial';
   import { fit, resize, zoomAt, type Size, type View } from './lib/view';
 
+  // The privacy page's address (`public/privacy.html`): `BASE_URL` is `/` locally and `/reKolor/`
+  // on GitHub Pages.
+  const privacyUrl = `${import.meta.env.BASE_URL}privacy.html`;
+
   // ── Engine ───────────────────────────────────────────────────────────────────────────────────
   // Engine startup and the status/error lines shown under the images.
   let ready = $state(false);
   let status = $state('Starting the engine…');
   let error = $state<string | undefined>();
+  // Shows an error message and reports its kind to LogRocket (on the published site only; see
+  // `lib/logrocket.ts`): only the kind, never the message, which can name the user's files.
+  function showError(kind: AppErrorKind, message: string) {
+    error = message;
+    reportError(kind);
+  }
 
   // The callback runs when the worker crashed and was restarted: the image is gone with it.
   const client = new EngineClient((reason) => {
     resetImage();
-    error = `The engine stopped (${reason}) and was restarted. Open the image again.`;
+    showError(
+      'workerFailed',
+      `The engine stopped (${reason}) and was restarted. Open the image again.`,
+    );
     void start();
   });
 
@@ -61,7 +76,7 @@
       status = `Engine ready · ${outcome.value.paletteSize} inks`;
     } else {
       status = 'The engine could not start.';
-      error = outcome.error.message;
+      showError(outcome.error.kind, outcome.error.message);
     }
   }
   // `void` starts the async function without waiting for it (and tells the linter that's intended).
@@ -164,7 +179,7 @@
     opening = false;
     if (opened.status === 'error') {
       if (opened.error.kind !== 'superseded') {
-        error = `${f.name}: ${opened.error.message}`;
+        showError(opened.error.kind, `${f.name}: ${opened.error.message}`);
         status = image ? 'Kept the previous image.' : 'Open an image to start.';
       }
       return;
@@ -186,17 +201,34 @@
     view = fit(image, viewport);
     status = 'Click a color in the original to pick it.';
     requestRecolor();
-    await countColors();
+    const counted = await countColors();
+    // Recorded once the colors are counted, with this open's own count (a material change while it
+    // counted starts another count, but this one is still this image's), unless another image was
+    // opened meanwhile. `colors` is left out only if counting failed. The format is a name from a
+    // fixed list (`imageFormat`), never part of the file's name.
+    if (gen === generation) {
+      track('Image opened', {
+        format: imageFormat(f),
+        width: opened.value.width,
+        height: opened.value.height,
+        ...(counted === undefined ? {} : { colors: counted }),
+      });
+    }
   }
 
-  /** Counts the current image's colors on the current material (shown in the toolbar). */
-  async function countColors() {
+  /**
+   * Counts the current image's colors on the current material (shown in the toolbar), and returns
+   * the count (`undefined` if counting failed), even when the toolbar no longer shows it.
+   */
+  async function countColors(): Promise<number | undefined> {
     const gen = generation;
     const on = material;
     colors = undefined;
     const counted = await client.call((api) => api.colorCount(gen, on));
-    // Only for the image and material it was made for.
-    if (gen === generation && on === material && counted.status === 'ok') colors = counted.value;
+    if (counted.status !== 'ok') return undefined;
+    // Shown only for the image and material it was made for.
+    if (gen === generation && on === material) colors = counted.value;
+    return counted.value;
   }
 
   // ── Picks ────────────────────────────────────────────────────────────────────────────────────
@@ -219,7 +251,7 @@
       const picked = await client.call((api) => api.pick(gen, x, y, on, seen));
       if (gen !== generation) return;
       if (picked.status === 'error') {
-        error = picked.error.message;
+        showError(picked.error.kind, picked.error.message);
         return;
       }
       // Unpacks the engine's answer into variables.
@@ -248,6 +280,7 @@
       ];
       status = `Picked (${pixel.r}, ${pixel.g}, ${pixel.b}) → ${suggestion.name}`;
       requestRecolor();
+      track('Pick added', { picks: picks.length });
     });
   }
 
@@ -294,7 +327,7 @@
     const picked = await client.call((api) => api.pick(gen, move.x, move.y, on, move.seen));
     if (gen !== generation) return;
     if (picked.status === 'error') {
-      if (picked.error.kind !== 'superseded') error = picked.error.message;
+      if (picked.error.kind !== 'superseded') showError(picked.error.kind, picked.error.message);
       return;
     }
     const { pixel, matching, suggestion, mismatch } = picked.value;
@@ -443,7 +476,7 @@
       ),
     );
     if (outcome.status === 'error') {
-      if (outcome.error.kind !== 'superseded') error = outcome.error.message;
+      if (outcome.error.kind !== 'superseded') showError(outcome.error.kind, outcome.error.message);
       return undefined;
     }
     return list.map((p, i) => {
@@ -473,7 +506,7 @@
       const picked = await client.call((api) => api.pick(gen, x, y, on, seen));
       if (gen !== generation) return;
       if (picked.status === 'error') {
-        error = picked.error.message;
+        showError(picked.error.kind, picked.error.message);
         return;
       }
       const { pixel } = picked.value;
@@ -537,10 +570,12 @@
   const removePick = (id: number) =>
     mutate(() => {
       picks = picks.filter((p) => p.id !== id);
+      track('Pick removed', { picks: picks.length });
     });
 
   const clearPicks = () =>
     mutate(() => {
+      track('Picks cleared', { removed: picks.length });
       picks = [];
     });
 
@@ -563,7 +598,10 @@
     e.currentTarget.value = '';
     if (!f) return;
     if (f.size > LIMITS.configBytes) {
-      error = `${f.name}: the config is larger than ${LIMITS.configBytes / 1024} KB.`;
+      showError(
+        'fileTooLarge',
+        `${f.name}: the config is larger than ${LIMITS.configBytes / 1024} KB.`,
+      );
       return;
     }
     const gen = generation;
@@ -573,12 +611,12 @@
       const parsed = await client.call(async (api) => api.parseConfig(await f.text()));
       if (gen !== generation) return;
       if (parsed.status === 'error') {
-        error = `${f.name}: ${parsed.error.message}`;
+        showError(parsed.error.kind, `${f.name}: ${parsed.error.message}`);
         return;
       }
       const { sections, material: fileMaterial, unprinted } = parsed.value;
       if (sections.length === 0) {
-        error = `${f.name}: the config has no palettes.`;
+        showError('invalidConfig', `${f.name}: the config has no palettes.`);
       } else if (sections.length === 1) {
         await applySection(
           sections[0]!,
@@ -627,7 +665,7 @@
     const resolved = await client.call((api) => api.resolveSection(section, fileMaterial));
     if (gen !== generation) return;
     if (resolved.status === 'error') {
-      error = `${name}: ${resolved.error.message}`;
+      showError(resolved.error.kind, `${name}: ${resolved.error.message}`);
       return;
     }
     picks = resolved.value.map((p) => ({
@@ -662,6 +700,11 @@
       ? `, ${unprinted.length} color${unprinted.length === 1 ? '' : 's'} left unprinted`
       : '';
     status = `Imported ${picks.length} pick${picks.length === 1 ? '' : 's'} (size ${section.size}) from ${name}${materialChanged ? `, on material ${hex(fileMaterial)}` : ''}${left}.`;
+    track('Picks imported', {
+      size: section.size,
+      picks: picks.length,
+      unprinted: unprinted.length,
+    });
     requestRecolor();
     if (materialChanged) void countColors();
   }
@@ -685,10 +728,11 @@
       ),
     );
     if (exported.status === 'error') {
-      error = exported.error.message;
+      showError(exported.error.kind, exported.error.message);
       return;
     }
     save(new Blob([exported.value], { type: 'application/toml' }), `${stem(name)}.palettes.toml`);
+    track('Picks exported', { picks: picks.length, unprinted: ranges.length });
   }
 
   // ── Live recolor: one in flight, one pending; stale results dropped ────────────────────────────
@@ -712,7 +756,7 @@
     recoloring = recolorer.busy && !current;
     if (outcome.status === 'error') {
       if (outcome.error.kind !== 'superseded' && req.generation === generation) {
-        error = outcome.error.message;
+        showError(outcome.error.kind, outcome.error.message);
       }
       return;
     }
@@ -784,10 +828,15 @@
     const png: AppOutcome<Blob> = await client.call((api) => api.encodePng(gen, rev));
     if (gen !== generation || rev !== revision) return; // changed while encoding
     if (png.status === 'error') {
-      if (png.error.kind !== 'superseded') error = png.error.message;
+      if (png.error.kind !== 'superseded') showError(png.error.kind, png.error.message);
       return;
     }
     save(png.value, `${stem(name)}-rekolor.png`);
+    // `inks` counts distinct inks: several picks may print with the same one.
+    track('PNG downloaded', {
+      picks: picks.length,
+      inks: new Set(picks.map((p) => p.ink.name)).size,
+    });
   }
 
   // The file name without its extension: the regular expression matches a final `.` and what
@@ -895,6 +944,10 @@
       >{/each}
   </h1>
   <p class="tagline">Preview a picture printed with a limited ink palette.</p>
+  <BuiltWith />
+  <!-- What the published site records, and why: a separate page (`public/privacy.html`), in a new
+       tab so the open image isn't lost. -->
+  <a class="privacy" href={privacyUrl} target="_blank" rel="noopener noreferrer">Privacy</a>
 </header>
 
 <!-- `class:dragging` adds the `dragging` class while the `dragging` variable is true (the
@@ -905,6 +958,7 @@
       bind:this={fileInput}
       id="file"
       type="file"
+      data-private
       accept="image/*"
       class="visually-hidden"
       tabindex="-1"
@@ -916,7 +970,10 @@
     <button type="button" class="primary" onclick={() => fileInput.click()} disabled={!ready}>
       Open image…
     </button>
-    <span class="file-info" data-testid="file-info">
+    <!-- `data-private`: LogRocket never records this element or what is in it, here the image's
+         file name (see `lib/logrocket.ts`). The status line, the error line and the palette
+         dialog below are private for the same reason. -->
+    <span class="file-info" data-testid="file-info" data-private>
       {#if file && image}
         {file.name} · {megabytes(file.size)} · {image.width} × {image.height}
         {#if colors !== undefined}· {colors.toLocaleString()} colors{:else}· counting colors…{/if}
@@ -982,9 +1039,9 @@
     />
   </section>
 
-  <p class="status" role="status" data-testid="status">{status}</p>
+  <p class="status" role="status" data-testid="status" data-private>{status}</p>
   {#if error}
-    <p class="error" role="alert">
+    <p class="error" role="alert" data-private>
       {error}
       <button type="button" class="link" onclick={() => (error = undefined)}>Dismiss</button>
     </p>
@@ -993,7 +1050,7 @@
   <!-- Shown by `sizeDialog.showModal()` when an imported config has several palettes. -->
   <dialog bind:this={sizeDialog} aria-labelledby="size-title">
     <h2 id="size-title">Which palette?</h2>
-    <p>{configName} has several palettes. Import one as the pick list:</p>
+    <p data-private>{configName} has several palettes. Import one as the pick list:</p>
     <div class="sizes">
       {#each configSections as section (section.size)}
         <button type="button" onclick={() => chooseSection(section)}>
@@ -1011,6 +1068,7 @@
         <input
           bind:this={configInput}
           type="file"
+          data-private
           accept=".toml,application/toml,text/plain"
           class="visually-hidden"
           tabindex="-1"
@@ -1143,6 +1201,9 @@
   }
   .tagline {
     margin: 0;
+    color: var(--muted);
+  }
+  .privacy {
     color: var(--muted);
   }
   main {
