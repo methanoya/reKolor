@@ -85,6 +85,20 @@ describe('keeping the image per tab', () => {
     expect((await persist.loadImage())?.name).toBe('newer.png');
   });
 
+  test('without Web Locks the image is not kept: nothing could delete it later', async () => {
+    // A browser without Web Locks (or a page not served over HTTPS).
+    Object.defineProperty(navigator, 'locks', { value: undefined, configurable: true });
+    try {
+      const persist = await fresh();
+      expect(await persist.saveImage(new File(['x'], 'x.png'))).toBe(false);
+      expect(await persist.loadImage()).toBeUndefined();
+      expect(await keys()).toEqual([]);
+    } finally {
+      // Removes the stand-in, so `navigator.locks` is the browser's again.
+      delete (navigator as unknown as Record<string, unknown>).locks;
+    }
+  });
+
   test('a duplicated tab takes a new ID and a copy of the image', async () => {
     // The original tab: its ID in sessionStorage (copied into the duplicate) and its lock held.
     sessionStorage.setItem('rekolor.tab', 'original');

@@ -129,14 +129,16 @@ main thread (Svelte)                      worker (src/lib/worker.ts)
   a private window), under the tab's ID. Each open page holds a Web Lock named after its tab; a
   starting page deletes images whose tab holds no lock (closed tabs), after a 3-second grace for
   tabs that are reloading. A duplicated tab finds its copied ID's lock taken and takes a new ID with
-  a copy of the image. At the first start the app restores, in order: the palette, the material, the
-  image (only the one the state was saved with), then the picks and unprinted colors exactly as they
-  were, unless the user has opened an image meanwhile (theirs wins). Nothing is saved before that,
-  so a fresh start can't overwrite it; and if the saved image can't come back (missing, a different
-  file, unreadable), the saved session stays until the next change, so a reload can try again. Image
-  saves are numbered and only the newest writes, and the saved state names the image only once its
-  bytes are stored, so a reload never pairs picks with another image. A save that doesn't fit leaves
-  the previous one. Browser tests clear both stores first (`tests/browser/setup.ts`).
+  a copy of the image. Without Web Locks (an old browser, or a page not served over HTTPS) a closed
+  tab's image could never be deleted, so the image isn't kept at all; the rest still is. At the
+  first start the app restores, in order: the palette, the material, the image (only the one the
+  state was saved with), then the picks and unprinted colors exactly as they were, unless the user
+  has opened an image meanwhile (theirs wins). Nothing is saved before that, so a fresh start can't
+  overwrite it; and if the saved image can't come back (missing, a different file, unreadable), the
+  saved session stays until the next change, so a reload can try again. Image saves are numbered and
+  only the newest writes, and the saved state names the image only once its bytes are stored, so a
+  reload never pairs picks with another image. A save that doesn't fit leaves the previous one.
+  Browser tests clear both stores first (`tests/browser/setup.ts`).
 - **Errors** come back as values (`AppOutcome`); a crashed worker is restarted and the user is told.
 
 ## Session recording (LogRocket)

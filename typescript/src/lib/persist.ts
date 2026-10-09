@@ -8,7 +8,9 @@
 // holds a Web Lock (`navigator.locks`) named after that ID. When a page starts, an image whose ID
 // no open page holds belongs to a closed tab and is deleted (`forgetClosedTabs`). A duplicated
 // tab gets a copy of `sessionStorage`, ID included; it finds that lock taken, so it takes a new ID
-// and a copy of the image.
+// and a copy of the image. Without Web Locks (an old browser, or a page not served over HTTPS) a
+// closed tab's image could never be told apart and deleted, so the image isn't kept at all; the
+// rest still is.
 //
 // Storage can be unavailable (a private window, blocked site data) or full: every function here
 // then does nothing, and the app works as before, just without restoring.
@@ -147,7 +149,10 @@ export function parseSavedState(text: string): SavedState | undefined {
 // Once per page: the ID is claimed (and its lock taken) by the first call, and reused after that.
 let tab: Promise<string | undefined> | undefined;
 
-/** This tab's ID, holding its lock; `undefined` without storage. */
+/** Whether the browser has Web Locks (`navigator.locks`). */
+const hasLocks = () => 'locks' in navigator && navigator.locks !== undefined;
+
+/** This tab's ID, holding its lock; `undefined` without storage or without Web Locks. */
 export function tabId(): Promise<string | undefined> {
   tab ??= claimTab();
   return tab;
@@ -155,13 +160,9 @@ export function tabId(): Promise<string | undefined> {
 
 async function claimTab(): Promise<string | undefined> {
   try {
+    // Without Web Locks, no ID: no image is stored (see the top of this file).
+    if (!hasLocks()) return undefined;
     const saved = sessionStorage.getItem(TAB_KEY);
-    // Without Web Locks (an old browser), the ID still works; closed tabs just aren't cleaned up.
-    if (!('locks' in navigator)) {
-      const id = saved ?? crypto.randomUUID();
-      sessionStorage.setItem(TAB_KEY, id);
-      return id;
-    }
     if (saved && (await hold(saved))) return saved;
     // No ID yet, or a duplicated tab (its ID is held by the original): a new ID, with a copy of
     // the original tab's image.
@@ -228,7 +229,7 @@ export async function loadImage(): Promise<File | undefined> {
  * `ORPHAN_GRACE_MS` (a reloading tab takes its lock back in between).
  */
 export async function forgetClosedTabs(): Promise<void> {
-  if (!('locks' in navigator)) return;
+  if (!hasLocks()) return;
   try {
     const id = await tabId();
     const orphans = async () => {

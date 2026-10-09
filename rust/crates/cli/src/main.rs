@@ -181,12 +181,13 @@ fn run(cli: Cli) -> Result<()> {
             let image = decode(&args.input)?;
             let stats = recolor_to_file(&image, &mappings, material, &ranges, &args.output)?;
             println!(
-                "{} → {} ({} picks on {}; {} exact, {} unprinted, {} nearest pixels)",
+                "{} → {} ({} picks on {}; {} exact, {} captured, {} unprinted, {} nearest pixels)",
                 args.input.display(),
                 args.output.display(),
                 mappings.len(),
                 describe(material),
                 stats.exact,
+                stats.captured,
                 stats.unprinted,
                 stats.nearest
             );

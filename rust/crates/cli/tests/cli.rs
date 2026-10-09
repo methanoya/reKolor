@@ -332,6 +332,52 @@ fn golden_update_writes_nothing_if_any_config_is_invalid() {
 }
 
 /// The RGBA pixel at (x, y) of a PNG.
+#[test]
+fn the_summary_counts_every_pixel_captured_ones_included() {
+    // A config whose first pick has a capture radius (`delta_e`).
+    let tree = samples_tree();
+    let root = tree.path();
+    let palette = repo_palette();
+    std::fs::write(
+        root.join("radius.palettes.toml"),
+        "[[palette]]\nsize = 2\npicks = [\n\
+         { rgba = [255, 184, 0, 255], ink = \"Pantone 1235\", delta_e = 30 },\n\
+         { rgba = [44, 44, 57, 255], ink = \"Pantone 532\" },\n]\n",
+    )
+    .unwrap();
+    let stdout = ok(rekolor(
+        &[
+            "recolor",
+            "samples/edges.png",
+            "-o",
+            "out.png",
+            "--config",
+            "radius.palettes.toml",
+            "--size",
+            "2",
+            "--palette",
+            palette.to_str().unwrap(),
+        ],
+        root,
+    ));
+    // "… exact, … captured, … unprinted, … nearest pixels": the four counts cover the image.
+    let count = |word: &str| -> u64 {
+        let before = stdout.split(&format!(" {word}")).next().unwrap();
+        before
+            .rsplit(|c: char| !c.is_ascii_digit())
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    assert!(count("captured") > 0, "{stdout}");
+    assert_eq!(
+        count("exact") + count("captured") + count("unprinted") + count("nearest"),
+        96 * 96,
+        "{stdout}"
+    );
+}
+
 fn pixel_at(path: &Path, x: u32, y: u32) -> [u8; 4] {
     let image = rekolor_io::decode_file(path).unwrap();
     let i = ((y * image.width() + x) * 4) as usize;
