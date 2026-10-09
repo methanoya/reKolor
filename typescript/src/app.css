@@ -1,0 +1,95 @@
+/* Global styles for the whole app (each Svelte component also has its own, scoped styles).
+
+   The colors are CSS custom properties ("variables", the `--name` entries), used elsewhere as
+   `var(--name)`. `:root` is the page's root element. */
+:root {
+  color-scheme: light dark;
+  --bg: #f7f7f5;
+  --fg: #1d1d1b;
+  --muted: #5d5d58;
+  --surface: #ffffff;
+  --border: #d5d5cf;
+  --checker: #ececea;
+  --accent: #d6002a;
+  --focus: #0057b8;
+  --warning: #9a5b00;
+  --error: #9f1239;
+  --error-bg: #fde8ec;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  line-height: 1.45;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+/* The same colors for dark mode: applied when the system is set to dark. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161615;
+    --fg: #ececea;
+    --muted: #a8a8a2;
+    --surface: #222220;
+    --border: #3d3d3a;
+    --checker: #2c2c2a;
+    --accent: #ff5470;
+    --focus: #6aa7ff;
+    --warning: #f0b45a;
+    --error: #ffb3c1;
+    --error-bg: #4a1220;
+  }
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+button {
+  font: inherit;
+  padding: 0.35rem 0.8rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+/* Shared button styles: the default, a disabled one, a `primary` one and a `link`-looking one. */
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--fg);
+  color: var(--bg);
+  border-color: var(--fg);
+}
+
+button.link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* A clear outline around whatever has keyboard focus (not shown for mouse clicks). */
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Hidden from sight but still read by screen readers (labels that are clear from the layout). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

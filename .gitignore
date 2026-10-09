@@ -1,1 +1,8 @@
-/.idea/
+# Files git should not track.
+# Editor and OS clutter: JetBrains IDE settings, macOS folder metadata.
+.idea/
+.DS_Store
+# Local working notes, not part of the published project.
+.agents/
+# Playwright MCP plugin (Claude Code): page snapshots, screenshots, downloads
+.playwright-mcp/

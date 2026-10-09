@@ -1,0 +1,20 @@
+# Palette exported from the reKolor web app for source.jpg.
+# Each pick is a color as stored in the image (RGBA) and the ink it prints with.
+
+material = [124, 193, 234]
+unprinted = [
+  { material = true, delta_e = 10 },
+]
+
+[[palette]]
+size = 8
+picks = [
+  { rgba = [243, 191, 151, 255], ink = "Pantone 473" },
+  { rgba = [54, 37, 45, 255], ink = "Pantone 5185" },
+  { rgba = [198, 104, 92, 255], ink = "Pantone 710" },
+  { rgba = [251, 247, 236, 255], ink = "Pure White (non-palette)" },
+  { rgba = [248, 200, 164, 255], ink = "Pantone 713" },
+  { rgba = [222, 199, 185, 255], ink = "Pantone 4755" },
+  { rgba = [245, 211, 174, 255], ink = "Pantone 719" },
+  { rgba = [209, 234, 239, 255], ink = "Pantone 628" },
+]

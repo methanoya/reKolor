@@ -1,4 +1,8 @@
-/node_modules/
-/public/build/
-
-.DS_Store
+# Installed packages (`npm install`), the production build (`npm run build`), and Playwright's
+# test reports.
+node_modules/
+dist/
+test-results/
+# Vitest browser mode: failure screenshots and attachments
+.vitest/
+__screenshots__/

@@ -1,0 +1,21 @@
+# The `*.palettes.toml` file format: parsing, validation, writing, and turning the picks into the
+# engine's mappings. Shared by the CLI and (through `rekolor-wasm`) the web app, so both read and
+# write the files identically. It does no file I/O: callers pass the text in and get text back.
+[package]
+name = "rekolor-config"
+description = "Palette config files (`*.palettes.toml`): parse, validate, write, and turn into mappings; no file I/O"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The engine's types (`Rgb8`, `Palette`, `Mapping`, …). `path` means a crate in this repository.
+rekolor-core = { path = "../core" }
+# Serde is Rust's (de)serialization framework; `derive` lets a struct get `#[derive(Deserialize)]`.
+serde = { version = "1.0.229", features = ["derive"] }
+# Derives the error-type boilerplate for `ConfigError`.
+thiserror = "2.0.21"
+# The TOML parser (TOML is the file format of `*.palettes.toml`, and of this file).
+# Parsing only: the writer is a few lines here, and `display` would add to the WASM size.
+toml = { version = "1.1.6", default-features = false, features = ["parse", "serde", "std"] }

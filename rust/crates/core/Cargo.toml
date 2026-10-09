@@ -1,0 +1,30 @@
+# The color engine: pure functions on RGBA pixel buffers (compositing, palette suggestions,
+# recoloring). No file, network, browser or WebAssembly code, so the CLI (native) and the web app
+# (through `rekolor-wasm`) run exactly the same logic.
+[package]
+name = "rekolor-core"
+description = "Color matching and recoloring on raw RGBA8 buffers; no I/O, no browser or WASM dependencies"
+# `*.workspace = true`: take the value from `[workspace.package]` in `../../Cargo.toml`.
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+# Libraries this crate uses (downloaded from crates.io by Cargo).
+[dependencies]
+# A logging facade: `log::debug!` and friends; the app or CLI decides where messages go.
+log = "0.4.34"
+# Color science: sRGB → CIE Lab conversion and the CIEDE2000 color difference (ΔE).
+# `libm` instead of the default `std`: the float functions are then the same pure-Rust code on every
+# target, so ΔE is bit-identical natively and in WASM. Enabling `palette/std` anywhere in the
+# workspace would switch it back (Cargo features are additive) and break that guarantee.
+palette = { version = "0.7.7", default-features = false, features = ["libm"] }
+# Derives the `std::error::Error` boilerplate for the `Error` enum (`#[derive(thiserror::Error)]`).
+thiserror = "2.0.21"
+
+# Libraries used only by tests and examples, not by the crate itself.
+[dev-dependencies]
+# Reads and writes the baseline PNG files in `testdata/baseline/`.
+png = "0.18.1"
+# Reads `palettes/pantone.json`; `preserve_order` keeps the file's key order (it decides ties).
+serde_json = { version = "1.0.151", features = ["preserve_order"] }

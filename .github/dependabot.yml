@@ -1,0 +1,29 @@
+# Dependabot: a GitHub service that looks for newer versions of what this project depends on, and
+# opens pull requests that update them. A person reviews each pull request; CI tests it like any
+# other; nothing changes until it is merged.
+#
+# Here it only watches the GitHub Actions used in `.github/workflows/` (the `uses:` lines). Those
+# are pinned to the exact commit of a release, with the release's name in a comment beside it;
+# Dependabot updates both.
+#
+# The file is YAML: `key: value` sets a value, indentation shows what belongs to what, a line
+# starting with `- ` is one item of a list, and `#` starts a comment.
+
+# The version of this file's format (always 2).
+version: 2
+# One entry per kind of dependency to watch; this project has one.
+updates:
+  # GitHub Actions, looked for in the workflow files of the repository's root folder (`/`).
+  - package-ecosystem: github-actions
+    directory: /
+    # How often it looks: once a week.
+    schedule:
+      interval: weekly
+    # Leave a release alone for its first week: early problems are usually found and fixed by then.
+    cooldown:
+      default-days: 7
+    # All action updates in one pull request a week, instead of one pull request per action. The
+    # group is named `actions`; the pattern `*` matches every action.
+    groups:
+      actions:
+        patterns: ['*']

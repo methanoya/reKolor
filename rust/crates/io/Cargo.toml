@@ -1,0 +1,21 @@
+# Native image file I/O for the CLI and the tests: decoding image files (PNG, JPEG, …) into RGBA
+# pixels and writing PNG files. Never used in the browser (the web app lets the browser decode), so
+# the large `image` crate stays out of the WebAssembly file.
+[package]
+name = "rekolor-io"
+description = "Native file decoding and encoding for rekolor (image crate), with decoder-discrepancy warnings"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The image decoders and encoders, with the formats chosen in the workspace `Cargo.toml`.
+image.workspace = true
+log = "0.4.34"
+rekolor-core = { path = "../core" }
+thiserror = "2.0.21"
+
+[dev-dependencies]
+# Temporary folders for tests that write files.
+tempfile = "3.27.0"

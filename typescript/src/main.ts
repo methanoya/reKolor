@@ -1,21 +1,9 @@
+// The app's entry point, loaded by `index.html`. Svelte compiles each `.svelte` component into
+// plain JavaScript; `mount` creates the root component (`App`) inside the `<div id="app">` of the
+// page. Importing the CSS file makes Vite add it to the page.
+import { mount } from 'svelte';
 import App from './App.svelte';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore
-import wasm from '../../rust/Cargo.toml';
-import 'bootstrap/dist/css/bootstrap.min.css';
+import './app.css';
 
-// import LogRocket from 'logrocket';
-// LogRocket.init('vl1t2j/kolor');
-
-const init = async () => {
-  const bindings = await wasm();
-
-  new App({
-    target: document.body,
-    props: {
-      bindings,
-    },
-  });
-};
-
-init();
+// `!` tells TypeScript the element exists (`getElementById` may return `null`).
+mount(App, { target: document.getElementById('app')! });

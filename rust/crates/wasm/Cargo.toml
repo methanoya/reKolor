@@ -1,0 +1,40 @@
+# The browser interface: compiles `rekolor-core` and `rekolor-config` to WebAssembly (WASM) and
+# generates the JavaScript glue and TypeScript types the web app imports.
+#
+# WebAssembly is a compact binary format browsers run next to JavaScript. `wasm-pack build` turns
+# this crate into an npm package in `pkg/`: the `.wasm` file, a `.js` file that loads it, and a
+# `.d.ts` file with the TypeScript types.
+[package]
+name = "rekolor-wasm"
+description = "Typed browser interface (wasm-bindgen + tsify) over rekolor-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lib]
+# `cdylib`: a C-style dynamic library, which is what the WASM build needs. `rlib`: a normal Rust
+# library too, so the Rust tests in `tests/` can call the same functions.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Prints Rust panics (crashes from bugs) to the browser console with their message.
+console_error_panic_hook = "0.1.7"
+# Sends `log` messages to the browser console.
+console_log = "1.1.0"
+# Bindings to JavaScript built-ins (`Object`, `Reflect`, …) for building JS values by hand.
+js-sys = "0.3.106"
+log = "0.4.34"
+rekolor-config = { path = "../config" }
+rekolor-core = { path = "../core" }
+serde = { version = "1.0.229", features = ["derive"] }
+# Generates TypeScript types from Rust structs and converts values across the boundary (`Ts<T>`).
+tsify = { version = "0.5.8", default-features = false, features = ["js"] }
+# The Rust ↔ JavaScript bridge: `#[wasm_bindgen]` exports functions and classes to JavaScript.
+wasm-bindgen = "0.2.129"
+
+[dev-dependencies]
+png = "0.18.1"
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+# Runs `#[wasm_bindgen_test]` tests inside WebAssembly (`wasm-pack test --node crates/wasm`).
+wasm-bindgen-test = "0.3.79"
