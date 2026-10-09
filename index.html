@@ -2,16 +2,17 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-
-    <title>reKolor matcher</title>
-
-    <link rel="icon" type="image/png" href="./favicon.png" />
-    <link rel="stylesheet" href="./global.css" />
-    <link rel="stylesheet" href="./build/bundle.css" />
-
-    <script defer src="./build/bundle.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Follow the system's light or dark mode (see `src/app.css`). -->
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" type="image/png" href="/reKolor/favicon.png" />
+    <title>reKolor</title>
+    <script type="module" crossorigin src="/reKolor/assets/index-Cw5UWYpC.js"></script>
+    <link rel="stylesheet" crossorigin href="/reKolor/assets/index-PAIqn95n.css">
   </head>
-
-  <body></body>
+  <body>
+    <!-- The app renders here (`src/main.ts`). In development Vite serves `main.ts` directly;
+         `npm run build` bundles it into plain JavaScript and rewrites this tag. -->
+    <div id="app"></div>
+  </body>
 </html>
