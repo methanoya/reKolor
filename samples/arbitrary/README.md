@@ -32,10 +32,10 @@ interactive browser tests reasonably fast.
 4. Use `02-rgb-6level-chart.png` for broad coverage and performance. It is also
    useful for checking that clicking the same source RGB value twice does not add
    duplicate choices.
-5. Use `07-alpha-hue.png` as an edge-case test. The current implementation
-   composites RGBA pixels against the material color (white by default) before
-   matching and emits an opaque PNG, so transparency loss should be recorded
-   explicitly as current behavior or as a bug, depending on product intent.
+5. Use `07-alpha-hue.png` as an edge-case test. reKolor composites RGBA pixels
+   over the material color (white when none is chosen) before matching, so the
+   output PNG is opaque, except where a color is left unprinted: those pixels
+   are transparent, so the material shows through.
 6. Use the red type image at 100% zoom. Check thin strokes and curved edges for
    halos or broken contours after palette reduction.
 
@@ -44,9 +44,11 @@ interactive browser tests reasonably fast.
 - JPEG and PNG inputs load without errors and report the correct dimensions.
 - Processing the same image, in the same click order, produces byte-identical
   PNG output.
-- The output contains only selected nominal Pantone colors.
+- The output contains only selected nominal Pantone colors (plus transparent
+  pixels where a color is left unprinted).
 - Exact source-color hits map to the Pantone color shown in the picker.
 - No unselected color appears in the processed image.
-- Empty selection preserves the original preview.
+- With no picks, nothing is printed: the preview shows only the material (or
+  the checkerboard when no material is chosen).
 - Processing time grows acceptably from the 258 x 200 chart to the 1280 x 842
   photograph.

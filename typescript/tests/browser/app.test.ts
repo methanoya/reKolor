@@ -946,6 +946,49 @@ describe('reKolor app', () => {
     expect(text).toContain('{ rgba = [0, 0, 0, 255], delta_e = 30 }');
   });
 
+  test('at most 256 colors are left unprinted, the material entry included', async () => {
+    const { screen, at, status } = await opened(await materialFile(), []);
+    const configInput = screen.container.querySelector<HTMLInputElement>('input[accept^=".toml"]')!;
+    // 255 distinct entries, one short of the limit (WASM `recolor` refuses more than 256).
+    const entries = Array.from(
+      { length: 255 },
+      (_, i) => `  { rgba = [${i}, 1, 2, 255], delta_e = 1 },\n`,
+    ).join('');
+    const config =
+      `unprinted = [\n${entries}]\n\n` +
+      '[[palette]]\nsize = 1\npicks = [\n' +
+      '  { rgba = [0, 0, 0, 255], ink = "Pure Black (non-palette)" },\n]\n';
+    await userEvent.upload(
+      page.elementLocator(configInput),
+      new File([config], 'full.palettes.toml'),
+    );
+    await expect.element(status).toMatchTextContent('255 colors left unprinted');
+    const add = screen.getByRole('button', { name: 'Leave a color unprinted' });
+    // Located after each + click: the canvas's accessible name changes with the mode.
+    const original = () => page.elementLocator(screen.container.querySelector(ORIGINAL)!);
+    // The 256th entry is added; the 257th is refused.
+    await add.click();
+    await userEvent.click(original(), { position: at(-15) }); // column 9: opaque red
+    await expect.element(status).toMatchTextContent('Left to the material: (200, 40, 40)');
+    await add.click();
+    await userEvent.click(original(), { position: at(18) }); // column 42: opaque black
+    await expect.element(status).toHaveTextContent('At most 256 colors can be left unprinted.');
+    expect(rangeRows(screen)).toHaveLength(256);
+    // A material finds the list full: its own color stays printed, and nothing fails.
+    await screen.getByRole('button', { name: 'Black' }).click();
+    await expect
+      .element(status)
+      .toMatchTextContent('its own color is printed: at most 256 colors can be left unprinted');
+    expect(rangeRows(screen)).toHaveLength(256);
+    expect(rangeRows(screen)).not.toContain('Material color · #000000');
+    await expect
+      .element(screen.getByText(/^Printed with 1 ink · 256 colors left to the material$/))
+      .toBeVisible();
+    expect(screen.container.querySelector('[role=alert]')).toBeNull();
+    // The result was recolored with all 256: the clicked red is transparent.
+    expect(await downloadedPixel(screen, 6, 16)).toEqual([0, 0, 0, 0]);
+  });
+
   test('Reset goes back to no material and keeps the clicked unprinted colors', async () => {
     // A translucent pick: its color changes with the material.
     const { screen, at, status } = await opened(await materialFile(), [-6]);

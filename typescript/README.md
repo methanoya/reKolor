@@ -87,7 +87,9 @@ main thread (Svelte)                      worker (src/lib/worker.ts)
   the preview shows the material there and the downloaded PNG is transparent. Entries are checked
   before the picks. A new image clears the clicked entries; the material's stays. Exported configs
   carry the entries (`unprinted`); an import replaces them with the file's (imported ones have no
-  square, as imported picks have no circle).
+  square, as imported picks have no circle). At most 256 entries, the material's own included (the
+  palette-config and WASM limit): a click past that is refused, and a material chosen when the
+  list is full stays printed.
 - **Layout:** toolbar (image, zoom, download), the two images, then at the bottom the picks on the
   left (as many columns as fit) and "Material" on the right (one column).
 - **Live recolor:** at most one recolor runs and one waits (the newest picks); every result carries

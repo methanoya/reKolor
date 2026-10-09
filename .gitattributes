@@ -1,0 +1,5 @@
+# Git settings per path.
+
+# A decoder fixture row with no warnings ends with an empty last column, which is a trailing tab:
+# part of the format, not a whitespace error for `git diff --check`.
+rust/testdata/decoders/references.tsv whitespace=-blank-at-eol

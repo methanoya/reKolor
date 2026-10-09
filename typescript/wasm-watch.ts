@@ -6,6 +6,7 @@
 // the settings, `configureServer` when the dev server starts). This file runs in Node.js, not in
 // the browser. `node:` imports are Node.js's built-in modules.
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,31 +29,58 @@ const manifests = [
 const DEBOUNCE_MS = 200;
 
 // Builds take a lock, so two dev servers on the same checkout build one after the other instead of
-// writing `pkg/` at the same time (which made one of them fail). A lock older than STALE_LOCK_MS is
-// left over from a killed build.
+// writing `pkg/` at the same time (which made one of them fail). The lock file holds its owner's
+// process ID and a token unique to that build. Another dev server breaks the lock only when the
+// owner process is gone (a killed dev server), or as a last resort when the lock is older than
+// STALE_LOCK_MS (the ID may have been reused by an unrelated process); a build itself can take
+// minutes. Only the build that took the lock removes it.
 const lockFile = path.join(rust, 'target', '.rekolor-wasm-watch.lock');
 const LOCK_RETRY_MS = 250;
-const STALE_LOCK_MS = 120_000;
+const STALE_LOCK_MS = 30 * 60_000;
 
 // Creates the lock file; the `wx` flag fails if it already exists, which makes taking the lock a
-// single atomic step. Returns whether the lock was taken.
-function tryLock(): boolean {
+// single atomic step. Returns the lock's token, or `undefined` if another build holds it (after
+// breaking it if it is stale, so the next try can take it). Exported for its unit test.
+export function tryLock(file: string): string | undefined {
+  const token = `${process.pid} ${randomUUID()}`;
   try {
-    fs.mkdirSync(path.dirname(lockFile), { recursive: true });
-    fs.writeFileSync(lockFile, String(process.pid), { flag: 'wx' });
-    return true;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, token, { flag: 'wx' });
+    return token;
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
     try {
-      if (Date.now() - fs.statSync(lockFile).mtimeMs > STALE_LOCK_MS) fs.rmSync(lockFile);
+      // A lock just created may still be empty: with no readable owner ID, only its age counts.
+      const owner = Number.parseInt(fs.readFileSync(file, 'utf8'), 10);
+      const ownerGone = owner > 0 && !isRunning(owner);
+      if (ownerGone || Date.now() - fs.statSync(file).mtimeMs > STALE_LOCK_MS) fs.rmSync(file);
     } catch {
       // Removed meanwhile by its owner: the next try takes it.
     }
-    return false;
+    return undefined;
   }
 }
 
-const unlock = () => fs.rmSync(lockFile, { force: true });
+/** Removes the lock, but only if it is still the one taken with `token`. */
+export function unlock(file: string, token: string): void {
+  try {
+    if (fs.readFileSync(file, 'utf8') === token) fs.rmSync(file);
+  } catch {
+    // Already gone.
+  }
+}
+
+/** Whether a process with this ID exists. */
+function isRunning(pid: number): boolean {
+  try {
+    // Signal 0 sends nothing: it only checks that the process exists.
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    // EPERM: the process exists but belongs to another user.
+    return (e as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
 
 // Whether a changed file affects the WASM package: a manifest, or a `.rs` file in a source folder.
 const isRustInput = (file: string) =>
@@ -85,7 +113,8 @@ export function wasmWatch(): Plugin | false {
           again = true; // one more build when this one is done
           return;
         }
-        if (!tryLock()) {
+        const token = tryLock(lockFile);
+        if (!token) {
           // Another dev server is building: try again shortly (a new change resets the wait).
           clearTimeout(timer);
           timer = setTimeout(build, LOCK_RETRY_MS);
@@ -110,7 +139,7 @@ export function wasmWatch(): Plugin | false {
           if (finished) return;
           finished = true;
           running = false;
-          unlock();
+          unlock(lockFile, token);
           // Even a failed build may have rewritten part of the package (e.g. wasm-bindgen ran, then
           // wasm-opt failed): drop the cached modules either way, so a manual reload never pairs
           // old JavaScript with a new `.wasm`.

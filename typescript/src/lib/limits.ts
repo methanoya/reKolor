@@ -14,6 +14,11 @@ export const LIMITS = {
   configBytes: 256 * 1024,
   /** Picks (= recolor mappings), the same limit as a config section and WASM `recolor`. */
   picks: 256,
+  /**
+   * Colors left unprinted (= material ranges), the material's own entry included: the same limit
+   * as a config's `unprinted` list and WASM `recolor`.
+   */
+  unprinted: 256,
 } as const;
 
 /** Why an image of this size is refused, or `undefined` if it's within the limits. */

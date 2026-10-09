@@ -3,8 +3,9 @@
 // - opaque sRGB and EXIF PNG: exact size and pixels;
 // - EXIF JPEG: exact size; colors close (JPEG decoders differ slightly);
 // - alpha ramp: alpha exact, colors composited over white within ±1 (what recolor sees);
-// - ICC profile: expected to differ (the browser applies it, `rekolor-io` reports it): the size
-//   must match and the decoder warning must be recorded; the difference is logged, not asserted.
+// - ICC profile: `rekolor-io` keeps the stored values and reports the profile; Chromium and WebKit
+//   apply it, Firefox doesn't (see `README.md`). The size must match and the decoder warning must
+//   be recorded; the color difference depends on the browser, so it is logged, not asserted.
 
 // Browser tests (`npm run test:browser`), run in each browser engine; `server.browser` names the
 // current one in the test titles. The reference pixels are the `.rgba` files written by the Rust
@@ -99,7 +100,7 @@ describe(`browser decoding vs rekolor-io (${server.browser})`, () => {
     expect(worst).toBeLessThanOrEqual(1);
   });
 
-  test('ICC profile: expected to differ; same size, and rekolor-io reports it', async () => {
+  test('ICC profile: same size and a reported warning; the color difference is logged', async () => {
     const ref = reference('icc-swapped');
     expect(ref.warnings).toContain('IccProfile');
     const got = await browserDecode('icc-swapped');

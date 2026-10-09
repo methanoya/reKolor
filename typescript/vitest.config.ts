@@ -1,5 +1,6 @@
 // Vitest (the test runner) settings, built on top of the Vite settings. Two test projects:
-// - `node`: unit tests next to the code (`src/**/*.test.ts`), run in Node.js (`npm test`);
+// - `node`: unit tests next to the code (`src/**/*.test.ts`, and `wasm-watch.test.ts` for the dev
+//   server plugin), run in Node.js (`npm test`);
 // - `browser`: tests in real browsers driven by Playwright (`npm run test:browser`), which mount
 //   the actual app and use the real WASM package in a real Web Worker.
 import { playwright } from '@vitest/browser-playwright';
@@ -14,7 +15,7 @@ export default defineConfig((env) =>
         {
           // `extends: true`: inherit the shared settings above (the Vite config).
           extends: true,
-          test: { name: 'node', include: ['src/**/*.test.ts'], environment: 'node' },
+          test: { name: 'node', include: ['src/**/*.test.ts', '*.test.ts'], environment: 'node' },
         },
         {
           extends: true,

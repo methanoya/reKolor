@@ -389,33 +389,40 @@
       ranges = ranges.filter((r) => !r.material);
       status = `Material reset${changes}.`;
     } else {
-      // Choosing a material (even the one in use) leaves its own color unprinted.
+      // Choosing a material (even the one in use) leaves its own color unprinted, if there's room.
       materialChosen = true;
-      setMaterialRange(next);
-      status = `Material ${hex(next)}${changes}.`;
+      const full = !setMaterialRange(next)
+        ? ` · its own color is printed: at most ${LIMITS.unprinted} colors can be left unprinted`
+        : '';
+      status = `Material ${hex(next)}${changes}${full}.`;
     }
     requestRecolor();
     if (changed && image) void countColors();
   }
 
   /**
-   * The material's own color as a range with the default ΔE: added if missing (also
-   * after being removed), otherwise moved to the new color with its ΔE kept.
+   * The material's own color as a range with the default ΔE: added if missing (also after being
+   * removed), otherwise moved to the new color with its ΔE kept. Not added when the list is full
+   * (`LIMITS.unprinted`). Returns whether the material's color is left unprinted.
    */
-  function setMaterialRange(color: Rgb) {
+  function setMaterialRange(color: Rgb): boolean {
     const pixel = { ...color, a: 255 };
-    ranges = ranges.some((r) => r.material)
-      ? ranges.map((r) => (r.material ? { ...r, pixel } : r))
-      : [
-          {
-            id: nextRangeId++,
-            pixel,
-            deltaE: RANGE_DELTA_E,
-            maxDeltaE: RANGE_SLIDER_MAX,
-            material: true,
-          },
-          ...ranges,
-        ];
+    if (ranges.some((r) => r.material)) {
+      ranges = ranges.map((r) => (r.material ? { ...r, pixel } : r));
+      return true;
+    }
+    if (ranges.length >= LIMITS.unprinted) return false;
+    ranges = [
+      {
+        id: nextRangeId++,
+        pixel,
+        deltaE: RANGE_DELTA_E,
+        maxDeltaE: RANGE_SLIDER_MAX,
+        material: true,
+      },
+      ...ranges,
+    ];
+    return true;
   }
 
   /**
@@ -456,6 +463,10 @@
     const gen = generation;
     void mutations.run(async () => {
       if (gen !== generation) return;
+      if (ranges.length >= LIMITS.unprinted) {
+        status = `At most ${LIMITS.unprinted} colors can be left unprinted.`;
+        return;
+      }
       const on = material;
       const picked = await client.call((api) => api.pick(gen, x, y, on, seen));
       if (gen !== generation) return;
