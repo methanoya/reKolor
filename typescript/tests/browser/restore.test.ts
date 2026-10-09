@@ -48,8 +48,10 @@ describe('restoring the saved work', () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(sessionStorage.getItem(STATE_KEY)).toBe(saved);
 
-    // The next change saves.
+    // The next change saves. First the change itself (so a click that didn't land shows as that),
+    // then the save.
     await screen.getByRole('button', { name: 'White' }).click();
+    await expect.element(screen.getByTestId('status')).toHaveTextContent('Material #ffffff.');
     await expect
       .poll(
         () => (JSON.parse(sessionStorage.getItem(STATE_KEY)!) as { material: unknown }).material,

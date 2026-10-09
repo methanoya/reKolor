@@ -25,6 +25,10 @@ export default defineConfig((env) =>
             // Clears the work the app keeps across reloads before each test.
             setupFiles: ['tests/browser/setup.ts'],
             testTimeout: 30_000,
+            // How long `expect.poll` and `expect.element` keep retrying before a check fails: 10 s
+            // instead of 1 s. A passing check is just as fast; a busy CI runner (Firefox on Linux)
+            // gets time for clicks, worker calls and redraws to land.
+            expect: { poll: { timeout: 10_000 } },
             browser: {
               enabled: true,
               headless: true,
